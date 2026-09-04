@@ -1,0 +1,2628 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
+
+import '../language.dart';
+
+class DiseaseDetectionScreen extends StatefulWidget {
+  const DiseaseDetectionScreen({super.key});
+
+  @override
+  State<DiseaseDetectionScreen> createState() =>
+      _DiseaseDetectionScreenState();
+}
+
+class _DiseaseDetectionScreenState
+    extends State<DiseaseDetectionScreen> {
+  final ImagePicker picker = ImagePicker();
+
+  // ============================================================
+  // ONLINE BACKEND
+  // ============================================================
+
+  static const String backendUrl = 'http://10.85.135.132:5000';
+
+  // ============================================================
+  // OFFLINE TFLITE
+  // ============================================================
+
+  Interpreter? _interpreter;
+
+  List<String> _classes = [];
+
+  bool modelLoading = true;
+
+  // ============================================================
+  // UI STATE
+  // ============================================================
+
+  File? image;
+
+  bool analyzing = false;
+
+  String disease = '';
+  double confidence = 0;
+  String crop = '';
+
+  String severity = '';
+  String description = '';
+  String treatment = '';
+  String prevention = '';
+  String farmerAction = '';
+
+  String analysisMode = '';
+
+  // ============================================================
+  // INITIALIZE
+  // ============================================================
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOfflineModel();
+  }
+
+  Future<void> _loadOfflineModel() async {
+    try {
+      debugPrint('==========================================');
+      debugPrint('LOADING OFFLINE TFLITE MODEL');
+      debugPrint('==========================================');
+
+      _interpreter = await Interpreter.fromAsset(
+        'assets/models/krishi_rakshak.tflite',
+      );
+
+      final jsonString = await rootBundle.loadString(
+        'assets/classes/classes.json',
+      );
+
+      final decoded = jsonDecode(jsonString);
+
+      if (decoded is! List) {
+        throw Exception(
+          'classes.json must contain a JSON list',
+        );
+      }
+
+      _classes = decoded
+          .map((e) => e.toString())
+          .toList();
+
+      final inputTensor =
+          _interpreter!.getInputTensor(0);
+
+      final outputTensor =
+          _interpreter!.getOutputTensor(0);
+
+      debugPrint('TFLite loaded successfully');
+      debugPrint(
+        'Input shape: ${inputTensor.shape}',
+      );
+      debugPrint(
+        'Input type: ${inputTensor.type}',
+      );
+      debugPrint(
+        'Output shape: ${outputTensor.shape}',
+      );
+      debugPrint(
+        'Output type: ${outputTensor.type}',
+      );
+      debugPrint(
+        'Classes: ${_classes.length}',
+      );
+
+      if (_classes.length != 38) {
+        throw Exception(
+          'Expected 38 classes but found '
+          '${_classes.length}',
+        );
+      }
+
+      if (mounted) {
+        setState(() {
+          modelLoading = false;
+        });
+      }
+
+      debugPrint('OFFLINE MODEL READY');
+    } catch (e) {
+      debugPrint(
+        'OFFLINE MODEL LOAD ERROR: $e',
+      );
+
+      if (mounted) {
+        setState(() {
+          modelLoading = false;
+        });
+
+        message(
+          'Offline AI model could not be loaded. '
+          'Online mode may still work.',
+        );
+      }
+    }
+  }
+
+  // ============================================================
+  // CAMERA / GALLERY
+  // ============================================================
+
+  Future<void> choose(ImageSource source) async {
+    try {
+      final XFile? picked = await picker.pickImage(
+        source: source,
+        imageQuality: 90,
+      );
+
+      if (picked == null) {
+        return;
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        image = File(picked.path);
+
+        disease = '';
+        confidence = 0;
+        crop = '';
+
+        severity = '';
+        description = '';
+        treatment = '';
+        prevention = '';
+        farmerAction = '';
+
+        analysisMode = '';
+      });
+    } catch (e) {
+      debugPrint(
+        'IMAGE PICK ERROR: $e',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      message(
+        source == ImageSource.camera
+            ? tr(context, 'cameraError')
+            : tr(context, 'galleryError'),
+      );
+    }
+  }
+
+  // ============================================================
+  // MAIN ANALYZE
+  //
+  // ONLINE FIRST
+  //      ↓
+  // ONLINE FAIL
+  //      ↓
+  // OFFLINE TFLITE
+  // ============================================================
+
+  Future<void> analyze() async {
+    if (image == null) {
+      message(tr(context, 'select'));
+      return;
+    }
+
+    if (analyzing) {
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      analyzing = true;
+      analysisMode = '';
+    });
+
+    debugPrint('');
+    debugPrint('==========================================');
+    debugPrint('KRISHI RAKSHAK AI ANALYSIS');
+    debugPrint('==========================================');
+    debugPrint('Image: ${image!.path}');
+
+    // ==========================================================
+    // TRY ONLINE FIRST
+    // ==========================================================
+
+    try {
+      await _analyzeOnline();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        analyzing = false;
+        analysisMode = 'ONLINE';
+      });
+
+      debugPrint(
+        'ONLINE ANALYSIS SUCCESS',
+      );
+
+      showResult();
+      return;
+    } catch (e) {
+      debugPrint(
+        'ONLINE ANALYSIS FAILED',
+      );
+      debugPrint('$e');
+      debugPrint(
+        'Switching to OFFLINE TFLite...',
+      );
+    }
+
+    // ==========================================================
+    // FALLBACK OFFLINE
+    // ==========================================================
+
+    try {
+      await _analyzeOffline();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        analyzing = false;
+        analysisMode = 'OFFLINE';
+      });
+
+      debugPrint(
+        'OFFLINE ANALYSIS SUCCESS',
+      );
+
+      showResult();
+    } catch (e) {
+      debugPrint(
+        'OFFLINE ANALYSIS FAILED',
+      );
+      debugPrint('$e');
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        analyzing = false;
+      });
+
+      message(
+        'AI analysis failed in both online '
+        'and offline mode.',
+      );
+    }
+  }
+
+  // ============================================================
+  // ONLINE ANALYSIS
+  // ============================================================
+
+  Future<void> _analyzeOnline() async {
+    final lang =
+        LanguageScope.of(context).value;
+
+    final url =
+        '$backendUrl/api/predict';
+
+    debugPrint(
+      'Trying online backend...',
+    );
+    debugPrint(
+      'Backend: $url',
+    );
+    debugPrint(
+      'Language: $lang',
+    );
+
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse(url),
+    );
+
+    request.fields['language'] = lang;
+
+    request.files.add(
+      await http.MultipartFile.fromPath(
+        'image',
+        image!.path,
+      ),
+    );
+
+    final streamedResponse =
+        await request.send().timeout(
+      const Duration(seconds: 15),
+    );
+
+    final response =
+        await http.Response.fromStream(
+      streamedResponse,
+    );
+
+    debugPrint(
+      'Online status: ${response.statusCode}',
+    );
+
+    debugPrint(
+      'Online response: ${response.body}',
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Backend error ${response.statusCode}: '
+        '${response.body}',
+      );
+    }
+
+    final decoded =
+        jsonDecode(response.body);
+
+    if (decoded is! Map) {
+      throw Exception(
+        'Invalid backend response',
+      );
+    }
+
+    final Map<String, dynamic> data =
+        Map<String, dynamic>.from(decoded);
+
+    // ==========================================================
+    // HANDLE ERROR RESPONSE
+    // ==========================================================
+
+    if (data.containsKey('success') &&
+        data['success'] == false) {
+      throw Exception(
+        data['error']?.toString() ??
+            data['message']?.toString() ??
+            'Online AI analysis failed',
+      );
+    }
+
+    // ==========================================================
+    // SUPPORT NESTED RESULT
+    // ==========================================================
+
+    Map<String, dynamic> result = data;
+
+    if (data['result'] is Map) {
+      result = Map<String, dynamic>.from(
+        data['result'] as Map,
+      );
+    }
+
+    if (data['prediction'] is Map) {
+      result = Map<String, dynamic>.from(
+        data['prediction'] as Map,
+      );
+    }
+
+    // ==========================================================
+    // READ DISEASE
+    // ==========================================================
+
+    final detectedDisease =
+        result['disease']?.toString() ??
+        result['detected_disease']?.toString() ??
+        result['class']?.toString() ??
+        result['prediction']?.toString() ??
+        result['label']?.toString() ??
+        'Unknown';
+
+    // ==========================================================
+    // READ CONFIDENCE
+    // ==========================================================
+
+    double detectedConfidence =
+        _toDouble(
+          result['confidence'],
+        );
+
+    if (detectedConfidence == 0) {
+      detectedConfidence =
+          _toDouble(
+            result['probability'],
+          );
+    }
+
+    if (detectedConfidence == 0) {
+      detectedConfidence =
+          _toDouble(
+            result['score'],
+          );
+    }
+
+    // Convert 0-1 → 0-100.
+    if (detectedConfidence > 0 &&
+        detectedConfidence <= 1) {
+      detectedConfidence *= 100;
+    }
+
+    // ==========================================================
+    // OTHER INFORMATION
+    // ==========================================================
+
+    final detectedCrop =
+        result['crop']?.toString() ??
+        result['plant']?.toString() ??
+        '';
+
+    final detectedSeverity =
+        result['severity']?.toString() ??
+        '';
+
+    final detectedDescription =
+        result['description']?.toString() ??
+        '';
+
+    final detectedTreatment =
+        result['treatment']?.toString() ??
+        '';
+
+    final detectedPrevention =
+        result['prevention']?.toString() ??
+        '';
+
+    final detectedFarmerAction =
+        result['farmerAction']?.toString() ??
+        result['farmer_action']?.toString() ??
+        '';
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      disease = detectedDisease;
+      confidence = detectedConfidence;
+      crop = detectedCrop;
+
+      severity = detectedSeverity;
+      description = detectedDescription;
+      treatment = detectedTreatment;
+      prevention = detectedPrevention;
+      farmerAction = detectedFarmerAction;
+    });
+  }
+
+  // ============================================================
+  // OFFLINE TFLITE ANALYSIS
+  // ============================================================
+
+  Future<void> _analyzeOffline() async {
+    if (_interpreter == null) {
+      throw Exception(
+        'Offline TFLite model is not available',
+      );
+    }
+
+    if (_classes.length != 38) {
+      throw Exception(
+        'Invalid offline class configuration',
+      );
+    }
+
+    debugPrint(
+      'Running local TFLite inference...',
+    );
+
+    final bytes =
+        await image!.readAsBytes();
+
+    final decodedImage =
+        img.decodeImage(bytes);
+
+    if (decodedImage == null) {
+      throw Exception(
+        'Could not decode selected image',
+      );
+    }
+
+    // ==========================================================
+    // MODEL INPUT
+    // [1, 224, 224, 3]
+    // ==========================================================
+
+    final resized = img.copyResize(
+      decodedImage,
+      width: 224,
+      height: 224,
+      interpolation:
+          img.Interpolation.linear,
+    );
+
+    // ==========================================================
+    // FLOAT32 INPUT
+    //
+    // Training:
+    // rescale = 1./255
+    //
+    // Therefore:
+    // RGB 0-255 → 0-1
+    // ==========================================================
+
+    final input = [
+      List.generate(
+        224,
+        (y) => List.generate(
+          224,
+          (x) {
+            final pixel =
+                resized.getPixel(x, y);
+
+            return [
+              pixel.r.toDouble() / 255.0,
+              pixel.g.toDouble() / 255.0,
+              pixel.b.toDouble() / 255.0,
+            ];
+          },
+        ),
+      ),
+    ];
+
+    // ==========================================================
+    // OUTPUT
+    // [1, 38]
+    // ==========================================================
+
+    final output = [
+      List<double>.filled(
+        38,
+        0.0,
+      ),
+    ];
+
+    _interpreter!.run(
+      input,
+      output,
+    );
+
+    final probabilities =
+        output[0];
+
+    // ==========================================================
+    // FIND BEST CLASS
+    // ==========================================================
+
+    int bestIndex = 0;
+
+    for (int i = 1;
+        i < probabilities.length;
+        i++) {
+      if (probabilities[i] >
+          probabilities[bestIndex]) {
+        bestIndex = i;
+      }
+    }
+
+    final bestProbability =
+        probabilities[bestIndex];
+
+    if (bestIndex >= _classes.length) {
+      throw Exception(
+        'Invalid class index: $bestIndex',
+      );
+    }
+
+    final predictedClass =
+        _classes[bestIndex];
+
+    // ==========================================================
+    // EXTRACT CROP
+    //
+    // Apple___Apple_scab
+    //       ↓
+    // Apple
+    // ==========================================================
+
+    final parts =
+        predictedClass.split('___');
+
+    final predictedCrop =
+        parts.isNotEmpty
+            ? parts.first
+                .replaceAll('_', ' ')
+                .replaceAll(',', '')
+            : 'Unknown';
+
+    // ==========================================================
+    // STORE RESULT
+    // ==========================================================
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      disease = predictedClass;
+
+      crop = predictedCrop;
+
+      confidence =
+          bestProbability * 100;
+
+      severity = '';
+      description = '';
+      treatment = '';
+      prevention = '';
+      farmerAction = '';
+    });
+
+    debugPrint(
+      '------------------------------------------',
+    );
+    debugPrint(
+      'OFFLINE RESULT',
+    );
+    debugPrint(
+      'Class index: $bestIndex',
+    );
+    debugPrint(
+      'Class: $predictedClass',
+    );
+    debugPrint(
+      'Crop: $predictedCrop',
+    );
+    debugPrint(
+      'Confidence: '
+      '${(bestProbability * 100).toStringAsFixed(2)}%',
+    );
+    debugPrint(
+      '------------------------------------------',
+    );
+  }
+
+  // ============================================================
+  // NUMBER PARSER
+  // ============================================================
+
+  double _toDouble(dynamic value) {
+    if (value == null) {
+      return 0;
+    }
+
+    if (value is num) {
+      return value.toDouble();
+    }
+
+    return double.tryParse(
+          value.toString(),
+        ) ??
+        0;
+  }
+
+  // ============================================================
+  // MESSAGE
+  // ============================================================
+
+  void message(String text) {
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(
+      SnackBar(
+        content: Text(text),
+      ),
+    );
+  }
+
+  // ============================================================
+  // RESULT
+  // ============================================================
+
+  void showResult() {
+    final lang =
+        LanguageScope.of(context).value;
+
+    final displayDisease =
+        disease.isEmpty
+            ? 'Unknown'
+            : diseaseLabel(
+                disease,
+                lang,
+              );
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape:
+          const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(
+          top: Radius.circular(28),
+        ),
+      ),
+      builder: (c) {
+        return SafeArea(
+          child:
+              SingleChildScrollView(
+            padding:
+                const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
+              children: [
+                // HANDLE
+                Center(
+                  child: Container(
+                    width: 45,
+                    height: 5,
+                    decoration:
+                        BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius:
+                          BorderRadius.circular(
+                        8,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(
+                  height: 20,
+                ),
+
+                const Center(
+                  child: Icon(
+                    Icons
+                        .auto_awesome_rounded,
+                    size: 58,
+                    color:
+                        Color(0xFF2E7D32),
+                  ),
+                ),
+
+                const SizedBox(
+                  height: 10,
+                ),
+
+                const Center(
+                  child: Text(
+                    'AI Analysis Complete',
+                    textAlign:
+                        TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 23,
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(
+                  height: 10,
+                ),
+
+                // =================================================
+                // MODE
+                // =================================================
+
+                Center(
+                  child: Container(
+                    padding:
+                        const EdgeInsets
+                            .symmetric(
+                      horizontal: 14,
+                      vertical: 7,
+                    ),
+                    decoration:
+                        BoxDecoration(
+                      color:
+                          analysisMode ==
+                                  'ONLINE'
+                              ? const Color(
+                                  0xFFE3F2FD,
+                                )
+                              : const Color(
+                                  0xFFE8F5E9,
+                                ),
+                      borderRadius:
+                          BorderRadius.circular(
+                        20,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize:
+                          MainAxisSize.min,
+                      children: [
+                        Icon(
+                          analysisMode ==
+                                  'ONLINE'
+                              ? Icons
+                                  .cloud_done_rounded
+                              : Icons
+                                  .offline_bolt_rounded,
+                          size: 18,
+                          color:
+                              analysisMode ==
+                                      'ONLINE'
+                                  ? Colors
+                                      .blue
+                                      .shade700
+                                  : const Color(
+                                      0xFF2E7D32,
+                                    ),
+                        ),
+                        const SizedBox(
+                          width: 7,
+                        ),
+                        Text(
+                          analysisMode ==
+                                  'ONLINE'
+                              ? 'ONLINE AI'
+                              : 'OFFLINE AI',
+                          style:
+                              TextStyle(
+                            fontWeight:
+                                FontWeight.bold,
+                            color:
+                                analysisMode ==
+                                        'ONLINE'
+                                    ? Colors
+                                        .blue
+                                        .shade700
+                                    : const Color(
+                                        0xFF2E7D32,
+                                      ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(
+                  height: 22,
+                ),
+
+                // =================================================
+                // DISEASE
+                // =================================================
+
+                resultCard(
+                  icon: Icons
+                      .local_florist_rounded,
+                  title:
+                      'Detected Disease',
+                  text:
+                      displayDisease,
+                ),
+
+                const SizedBox(
+                  height: 12,
+                ),
+
+                // =================================================
+                // CONFIDENCE
+                // =================================================
+
+                resultCard(
+                  icon:
+                      Icons.speed_rounded,
+                  title:
+                      'AI Confidence',
+                  text: confidence > 0
+                      ? '${confidence.toStringAsFixed(2)}%'
+                      : 'Not provided',
+                ),
+
+                // =================================================
+                // CROP
+                // =================================================
+
+                if (crop.isNotEmpty) ...[
+                  const SizedBox(
+                    height: 12,
+                  ),
+                  resultCard(
+                    icon:
+                        Icons.eco_rounded,
+                    title: 'Crop',
+                    text: crop,
+                  ),
+                ],
+
+                // =================================================
+                // SEVERITY
+                // =================================================
+
+                if (severity.isNotEmpty) ...[
+                  const SizedBox(
+                    height: 12,
+                  ),
+                  resultCard(
+                    icon: Icons
+                        .warning_amber_rounded,
+                    title: 'Severity',
+                    text: severity,
+                  ),
+                ],
+
+                // =================================================
+                // DESCRIPTION
+                // =================================================
+
+                if (description
+                    .isNotEmpty) ...[
+                  const SizedBox(
+                    height: 12,
+                  ),
+                  resultCard(
+                    icon: Icons
+                        .info_outline,
+                    title: 'Description',
+                    text: description,
+                  ),
+                ],
+
+                // =================================================
+                // TREATMENT
+                // =================================================
+
+                if (treatment.isNotEmpty) ...[
+                  const SizedBox(
+                    height: 12,
+                  ),
+                  resultCard(
+                    icon: Icons
+                        .medical_services_outlined,
+                    title: 'Treatment',
+                    text: treatment,
+                  ),
+                ],
+
+                // =================================================
+                // PREVENTION
+                // =================================================
+
+                if (prevention
+                    .isNotEmpty) ...[
+                  const SizedBox(
+                    height: 12,
+                  ),
+                  resultCard(
+                    icon: Icons
+                        .shield_outlined,
+                    title: 'Prevention',
+                    text: prevention,
+                  ),
+                ],
+
+                // =================================================
+                // FARMER ACTION
+                // =================================================
+
+                if (farmerAction
+                    .isNotEmpty) ...[
+                  const SizedBox(
+                    height: 12,
+                  ),
+                  resultCard(
+                    icon: Icons
+                        .agriculture_rounded,
+                    title:
+                        'What You Should Do Now',
+                    text:
+                        farmerAction,
+                  ),
+                ],
+
+                // =================================================
+                // OFFLINE INFO
+                // =================================================
+
+                if (analysisMode ==
+                    'OFFLINE') ...[
+                  const SizedBox(
+                    height: 12,
+                  ),
+                  resultCard(
+                    icon: Icons
+                        .offline_bolt_rounded,
+                    title:
+                        'Offline Mode',
+                    text:
+                        'Prediction was generated '
+                        'directly on your device. '
+                        'Internet connection was '
+                        'not required.',
+                  ),
+                ],
+
+                const SizedBox(
+                  height: 20,
+                ),
+
+                // =================================================
+                // DONE
+                // =================================================
+
+                SizedBox(
+                  width:
+                      double.infinity,
+                  child:
+                      ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(c);
+                    },
+                    style:
+                        ElevatedButton.styleFrom(
+                      backgroundColor:
+                          const Color(
+                        0xFF2E7D32,
+                      ),
+                      foregroundColor:
+                          Colors.white,
+                      padding:
+                          const EdgeInsets
+                              .symmetric(
+                        vertical: 16,
+                      ),
+                    ),
+                    child:
+                        const Text(
+                      'Done',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight:
+                            FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ============================================================
+  // RESULT CARD
+  // ============================================================
+
+  Widget resultCard({
+    required IconData icon,
+    required String title,
+    required String text,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding:
+          const EdgeInsets.all(16),
+      decoration:
+          BoxDecoration(
+        color:
+            const Color(0xFFF7FAF6),
+        borderRadius:
+            BorderRadius.circular(16),
+      ),
+      child: Row(
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
+        children: [
+          Icon(
+            icon,
+            color:
+                const Color(0xFF2E7D32),
+            size: 25,
+          ),
+
+          const SizedBox(
+            width: 12,
+          ),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style:
+                      const TextStyle(
+                    fontWeight:
+                        FontWeight.bold,
+                    color:
+                        Color(0xFF1B5E20),
+                    fontSize: 16,
+                  ),
+                ),
+
+                const SizedBox(
+                  height: 6,
+                ),
+
+                Text(
+                  text,
+                  style:
+                      const TextStyle(
+                    height: 1.45,
+                    fontSize: 15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // DISPOSE
+  // ============================================================
+
+  @override
+  void dispose() {
+    _interpreter?.close();
+    super.dispose();
+  }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    return Scaffold(
+      backgroundColor:
+          const Color(0xFFF4FAF2),
+
+      appBar: AppBar(
+        backgroundColor:
+            const Color(0xFF2E7D32),
+        foregroundColor:
+            Colors.white,
+        title: Text(
+          tr(context, 'disease'),
+        ),
+      ),
+
+      body:
+          SingleChildScrollView(
+        padding:
+            const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            const Icon(
+              Icons
+                  .local_florist_rounded,
+              size: 70,
+              color:
+                  Color(0xFF2E7D32),
+            ),
+
+            const SizedBox(
+              height: 12,
+            ),
+
+            Text(
+              tr(context, 'disease'),
+              style:
+                  const TextStyle(
+                fontSize: 26,
+                fontWeight:
+                    FontWeight.bold,
+                color:
+                    Color(0xFF1B5E20),
+              ),
+            ),
+
+            const SizedBox(
+              height: 8,
+            ),
+
+            Text(
+              tr(context, 'help'),
+              textAlign:
+                  TextAlign.center,
+              style:
+                  const TextStyle(
+                color: Colors.black54,
+              ),
+            ),
+
+            const SizedBox(
+              height: 28,
+            ),
+
+            // ====================================================
+            // IMAGE
+            // ====================================================
+
+            Container(
+              width: double.infinity,
+              height: 280,
+              decoration:
+                  BoxDecoration(
+                color: Colors.white,
+                borderRadius:
+                    BorderRadius.circular(
+                  24,
+                ),
+                border: Border.all(
+                  color:
+                      const Color(
+                    0xFFA5D6A7,
+                  ),
+                ),
+              ),
+              child: image == null
+                  ? Column(
+                      mainAxisAlignment:
+                          MainAxisAlignment
+                              .center,
+                      children: [
+                        const Icon(
+                          Icons
+                              .add_a_photo_rounded,
+                          size: 65,
+                          color:
+                              Color(
+                            0xFF66BB6A,
+                          ),
+                        ),
+
+                        const SizedBox(
+                          height: 15,
+                        ),
+
+                        Text(
+                          tr(
+                            context,
+                            'noImage',
+                          ),
+                          style:
+                              const TextStyle(
+                            fontSize: 17,
+                            fontWeight:
+                                FontWeight
+                                    .w600,
+                          ),
+                        ),
+
+                        const SizedBox(
+                          height: 6,
+                        ),
+
+                        Text(
+                          tr(
+                            context,
+                            'choose',
+                          ),
+                          style:
+                              const TextStyle(
+                            color:
+                                Colors
+                                    .black45,
+                          ),
+                        ),
+                      ],
+                    )
+                  : ClipRRect(
+                      borderRadius:
+                          BorderRadius.circular(
+                        22,
+                      ),
+                      child:
+                          Image.file(
+                        image!,
+                        width:
+                            double.infinity,
+                        height: 280,
+                        fit:
+                            BoxFit.cover,
+                      ),
+                    ),
+            ),
+
+            const SizedBox(
+              height: 18,
+            ),
+
+            // ====================================================
+            // CAMERA / GALLERY
+            // ====================================================
+
+            Row(
+              children: [
+                Expanded(
+                  child:
+                      OutlinedButton.icon(
+                    onPressed:
+                        analyzing
+                            ? null
+                            : () {
+                                choose(
+                                  ImageSource
+                                      .camera,
+                                );
+                              },
+                    icon: const Icon(
+                      Icons
+                          .camera_alt_rounded,
+                    ),
+                    label: Text(
+                      tr(
+                        context,
+                        'camera',
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(
+                  width: 12,
+                ),
+
+                Expanded(
+                  child:
+                      OutlinedButton.icon(
+                    onPressed:
+                        analyzing
+                            ? null
+                            : () {
+                                choose(
+                                  ImageSource
+                                      .gallery,
+                                );
+                              },
+                    icon: const Icon(
+                      Icons
+                          .photo_library_rounded,
+                    ),
+                    label: Text(
+                      tr(
+                        context,
+                        'gallery',
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(
+              height: 18,
+            ),
+
+            // ====================================================
+            // ANALYZE
+            // ====================================================
+
+            SizedBox(
+              width: double.infinity,
+              child:
+                  ElevatedButton.icon(
+                onPressed:
+                    analyzing ||
+                            modelLoading
+                        ? null
+                        : analyze,
+
+                icon: analyzing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child:
+                            CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color:
+                              Colors.white,
+                        ),
+                      )
+                    : const Icon(
+                        Icons
+                            .auto_awesome_rounded,
+                      ),
+
+                label: Text(
+                  modelLoading
+                      ? 'Loading AI model...'
+                      : analyzing
+                          ? 'AI is analyzing image...'
+                          : 'Analyze with AI',
+                ),
+
+                style:
+                    ElevatedButton
+                        .styleFrom(
+                  backgroundColor:
+                      const Color(
+                    0xFF2E7D32,
+                  ),
+                  foregroundColor:
+                      Colors.white,
+                  padding:
+                      const EdgeInsets
+                          .symmetric(
+                    vertical: 17,
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(
+              height: 20,
+            ),
+
+            // ====================================================
+            // ONLINE + OFFLINE INFO
+            // ====================================================
+
+            Container(
+              width: double.infinity,
+              padding:
+                  const EdgeInsets.all(16),
+              decoration:
+                  BoxDecoration(
+                color:
+                    const Color(
+                  0xFFE8F5E9,
+                ),
+                borderRadius:
+                    BorderRadius.circular(
+                  16,
+                ),
+              ),
+              child: const Row(
+                crossAxisAlignment:
+                    CrossAxisAlignment
+                        .start,
+                children: [
+                  Icon(
+                    Icons
+                        .cloud_sync_rounded,
+                    color:
+                        Color(0xFF1B5E20),
+                  ),
+
+                  SizedBox(
+                    width: 10,
+                  ),
+
+                  Expanded(
+                    child: Text(
+                      'Online AI is tried first. '
+                      'If the internet or server '
+                      'is unavailable, Krishi Rakshak '
+                      'automatically switches to '
+                      'offline AI on the device.',
+                      style: TextStyle(
+                        color:
+                            Color(0xFF1B5E20),
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}import 'dart:convert';
+import 'dart:io';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
+
+import '../language.dart';
+
+class DiseaseDetectionScreen extends StatefulWidget {
+  const DiseaseDetectionScreen({super.key});
+
+  @override
+  State<DiseaseDetectionScreen> createState() =>
+      _DiseaseDetectionScreenState();
+}
+
+class _DiseaseDetectionScreenState extends State<DiseaseDetectionScreen> {
+  static const String backendUrl = 'http://10.85.135.146:5000';
+
+  static const int modelInputSize = 224;
+  static const int expectedClasses = 192;
+
+  static const String pendingKey = 'pending_government_alerts';
+
+  final ImagePicker picker = ImagePicker();
+
+  Interpreter? _interpreter;
+  List<String> _classes = [];
+
+  bool modelLoading = true;
+  bool analyzing = false;
+  bool syncing = false;
+
+  File? image;
+
+  String disease = '';
+  double confidence = 0;
+  String crop = '';
+  String severity = '';
+  String description = '';
+  String treatment = '';
+  String prevention = '';
+  String farmerAction = '';
+  String analysisMode = '';
+  String predictionId = '';
+  String governmentAlertId = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOfflineModel();
+    _syncPendingAlerts();
+  }
+
+  Future<void> _loadOfflineModel() async {
+    try {
+      debugPrint('==========================================');
+      debugPrint('LOADING 192-CLASS OFFLINE TFLITE MODEL');
+      debugPrint('==========================================');
+
+      _interpreter = await Interpreter.fromAsset(
+        'assets/models/krishi_rakshak.tflite',
+      );
+
+      final jsonString = await rootBundle.loadString(
+        'assets/classes/classes.json',
+      );
+
+      final decoded = jsonDecode(jsonString);
+
+      if (decoded is List) {
+        _classes = decoded.map((e) => e.toString()).toList();
+      } else if (decoded is Map) {
+        final map = Map<String, dynamic>.from(decoded);
+        _classes = List.generate(
+          map.length,
+          (i) => map[i.toString()].toString(),
+        );
+      } else {
+        throw Exception('Unsupported classes.json format');
+      }
+
+      final inputTensor = _interpreter!.getInputTensor(0);
+      final outputTensor = _interpreter!.getOutputTensor(0);
+
+      debugPrint('Input shape: ${inputTensor.shape}');
+      debugPrint('Input type: ${inputTensor.type}');
+      debugPrint('Output shape: ${outputTensor.shape}');
+      debugPrint('Output type: ${outputTensor.type}');
+      debugPrint('Classes: ${_classes.length}');
+
+      if (_classes.length != expectedClasses) {
+        throw Exception(
+          'Expected $expectedClasses classes but found ${_classes.length}. '
+          'Copy the new 192-class classes.json into assets/classes/.',
+        );
+      }
+
+      if (inputTensor.shape.length != 4 ||
+          inputTensor.shape[0] != 1 ||
+          inputTensor.shape[1] != modelInputSize ||
+          inputTensor.shape[2] != modelInputSize ||
+          inputTensor.shape[3] != 3) {
+        throw Exception(
+          'Unexpected input shape: ${inputTensor.shape}. '
+          'Expected [1,224,224,3].',
+        );
+      }
+
+      if (outputTensor.shape.isEmpty ||
+          outputTensor.shape.last != expectedClasses) {
+        throw Exception(
+          'Unexpected output shape: ${outputTensor.shape}. '
+          'Expected 192 classes.',
+        );
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        modelLoading = false;
+      });
+
+      debugPrint('OFFLINE 192-CLASS MODEL READY');
+    } catch (e) {
+      debugPrint('OFFLINE MODEL LOAD ERROR: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        modelLoading = false;
+      });
+
+      message(
+        'Offline 192-class AI model could not be loaded. '
+        'Check that the new TFLite and classes.json are copied.',
+      );
+    }
+  }
+
+  Future<void> choose(ImageSource source) async {
+    try {
+      final picked = await picker.pickImage(
+        source: source,
+        imageQuality: 90,
+      );
+
+      if (picked == null || !mounted) return;
+
+      setState(() {
+        image = File(picked.path);
+        disease = '';
+        confidence = 0;
+        crop = '';
+        severity = '';
+        description = '';
+        treatment = '';
+        prevention = '';
+        farmerAction = '';
+        analysisMode = '';
+        predictionId = '';
+        governmentAlertId = '';
+      });
+    } catch (e) {
+      debugPrint('IMAGE PICK ERROR: $e');
+
+      if (!mounted) return;
+
+      message(
+        source == ImageSource.camera
+            ? tr(context, 'cameraError')
+            : tr(context, 'galleryError'),
+      );
+    }
+  }
+
+  Future<void> analyze() async {
+    if (image == null) {
+      message(tr(context, 'select'));
+      return;
+    }
+
+    if (analyzing) return;
+
+    setState(() {
+      analyzing = true;
+      analysisMode = '';
+      governmentAlertId = '';
+    });
+
+    debugPrint('==========================================');
+    debugPrint('KRISHI RAKSHAK AI ANALYSIS');
+    debugPrint('==========================================');
+
+    try {
+      await _analyzeOnline();
+
+      if (!mounted) return;
+
+      setState(() {
+        analyzing = false;
+        analysisMode = 'ONLINE';
+      });
+
+      showResult();
+      return;
+    } catch (e) {
+      debugPrint('ONLINE ANALYSIS FAILED: $e');
+      debugPrint('Falling back to OFFLINE TFLite...');
+    }
+
+    try {
+      await _analyzeOffline();
+
+      if (!mounted) return;
+
+      setState(() {
+        analyzing = false;
+        analysisMode = 'OFFLINE';
+      });
+
+      showResult();
+    } catch (e) {
+      debugPrint('OFFLINE ANALYSIS FAILED: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        analyzing = false;
+      });
+
+      message(
+        'AI analysis failed in both online and offline mode.',
+      );
+    }
+  }
+
+  Future<void> _analyzeOnline() async {
+    final lang = LanguageScope.of(context).value;
+
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('$backendUrl/api/predict'),
+    );
+
+    request.fields['language'] = lang;
+
+    request.files.add(
+      await http.MultipartFile.fromPath(
+        'image',
+        image!.path,
+      ),
+    );
+
+    final response = await request.send().timeout(
+      const Duration(seconds: 15),
+    );
+
+    final body = await http.Response.fromStream(response);
+
+    debugPrint('ONLINE HTTP: ${response.statusCode}');
+    debugPrint('ONLINE RESPONSE: ${body.body}');
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Backend ${response.statusCode}: ${body.body}',
+      );
+    }
+
+    final decoded = jsonDecode(body.body);
+
+    if (decoded is! Map) {
+      throw Exception('Invalid backend JSON');
+    }
+
+    final data = Map<String, dynamic>.from(decoded);
+
+    if (data['success'] == false) {
+      throw Exception(
+        data['error']?.toString() ?? 'Online prediction failed',
+      );
+    }
+
+    final prediction = data['prediction'];
+
+    if (prediction is! Map) {
+      throw Exception('Missing prediction object');
+    }
+
+    final p = Map<String, dynamic>.from(prediction);
+
+    final detectedDisease =
+        p['class_name']?.toString() ??
+        p['disease']?.toString() ??
+        'Unknown';
+
+    final detectedConfidence = _toPercent(
+      p['confidence'],
+    );
+
+    final detectedSeverity =
+        p['severity']?.toString() ?? '';
+
+    final predictionId =
+        data['prediction_id']?.toString() ?? '';
+
+    final governmentAlert = data['government_alert'];
+
+    String alertId = '';
+
+    if (governmentAlert is Map) {
+      alertId =
+          governmentAlert['alert_id']?.toString() ?? '';
+    }
+
+    final detectedCrop = _extractCrop(
+      detectedDisease,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      disease = detectedDisease;
+      confidence = detectedConfidence;
+      crop = detectedCrop;
+      severity = detectedSeverity;
+      predictionId = predictionId;
+      governmentAlertId = alertId;
+
+      description = '';
+      treatment = '';
+      prevention = '';
+      farmerAction = '';
+    });
+  }
+
+  Future<void> _analyzeOffline() async {
+    if (_interpreter == null) {
+      throw Exception('Offline TFLite model unavailable');
+    }
+
+    if (_classes.length != expectedClasses) {
+      throw Exception(
+        'Offline classes are not 192. Found ${_classes.length}.',
+      );
+    }
+
+    final bytes = await image!.readAsBytes();
+    final decodedImage = img.decodeImage(bytes);
+
+    if (decodedImage == null) {
+      throw Exception('Could not decode selected image');
+    }
+
+    final resized = img.copyResize(
+      decodedImage,
+      width: modelInputSize,
+      height: modelInputSize,
+      interpolation: img.Interpolation.linear,
+    );
+
+    // IMPORTANT:
+    // The new TFLite model already contains MobileNetV2 preprocessing.
+    // Feed RAW 0-255 float32 pixels. Do NOT divide by 255 here.
+    final input = [
+      List.generate(
+        modelInputSize,
+        (y) => List.generate(
+          modelInputSize,
+          (x) {
+            final pixel = resized.getPixel(x, y);
+            return [
+              pixel.r.toDouble(),
+              pixel.g.toDouble(),
+              pixel.b.toDouble(),
+            ];
+          },
+        ),
+      ),
+    ];
+
+    final output = [
+      List<double>.filled(
+        expectedClasses,
+        0.0,
+      ),
+    ];
+
+    _interpreter!.run(input, output);
+
+    final probabilities = output[0];
+
+    int bestIndex = 0;
+
+    for (int i = 1; i < probabilities.length; i++) {
+      if (probabilities[i] > probabilities[bestIndex]) {
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex >= _classes.length) {
+      throw Exception('Invalid class index: $bestIndex');
+    }
+
+    final bestProbability = probabilities[bestIndex];
+
+    final predictedClass = _classes[bestIndex];
+    final predictedCrop = _extractCrop(predictedClass);
+    final predictedSeverity = _calculateSeverity(
+      predictedClass,
+      bestProbability * 100,
+    );
+
+    final offlinePredictionId =
+        'offline-${DateTime.now().millisecondsSinceEpoch}';
+
+    if (!mounted) return;
+
+    setState(() {
+      disease = predictedClass;
+      crop = predictedCrop;
+      confidence = bestProbability * 100;
+      severity = predictedSeverity;
+      predictionId = offlinePredictionId;
+
+      description = '';
+      treatment = '';
+      prevention = '';
+      farmerAction = '';
+    });
+
+    final shouldAlert = _governmentAlertRequired(
+      predictedClass,
+      confidence,
+      predictedSeverity,
+    );
+
+    if (shouldAlert) {
+      await _savePendingAlert(
+        predictionId: offlinePredictionId,
+        classId: bestIndex,
+        className: predictedClass,
+        confidence: confidence,
+        severity: predictedSeverity,
+      );
+    }
+
+    debugPrint('OFFLINE RESULT');
+    debugPrint('Class: $predictedClass');
+    debugPrint('Class ID: $bestIndex');
+    debugPrint('Confidence: ${confidence.toStringAsFixed(2)}%');
+    debugPrint('Severity: $predictedSeverity');
+    debugPrint('Government alert queued: $shouldAlert');
+  }
+
+  String _extractCrop(String className) {
+    if (className.contains('___')) {
+      return className
+          .split('___')
+          .first
+          .replaceAll('_', ' ')
+          .trim();
+    }
+
+    final parts = className.trim().split(RegExp(r'\s+'));
+    return parts.isNotEmpty ? parts.first : 'Unknown';
+  }
+
+  bool _isHealthy(String className) {
+    final name = className.toLowerCase();
+
+    return name.contains('healthy') ||
+        name.contains('normal');
+  }
+
+  String _calculateSeverity(
+    String className,
+    double confidence,
+  ) {
+    if (_isHealthy(className)) return 'none';
+
+    final name = className.toLowerCase();
+
+    const highKeywords = [
+      'late blight',
+      'early blight',
+      'bacterial',
+      'virus',
+      'viral',
+      'canker',
+      'black rot',
+      'fire blight',
+      'yellow leaf curl',
+      'mosaic',
+      'wilt',
+      'scab',
+      'rust',
+    ];
+
+    final highRisk = highKeywords.any(
+      name.contains,
+    );
+
+    if (highRisk) {
+      return confidence >= 70 ? 'high' : 'medium';
+    }
+
+    if (confidence >= 80) return 'medium';
+
+    return 'low';
+  }
+
+  bool _governmentAlertRequired(
+    String className,
+    double confidence,
+    String severity,
+  ) {
+    if (_isHealthy(className)) return false;
+    if (confidence < 70) return false;
+
+    return severity == 'high' || severity == 'medium';
+  }
+
+  Future<void> _savePendingAlert({
+    required String predictionId,
+    required int classId,
+    required String className,
+    required double confidence,
+    required String severity,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final raw = prefs.getStringList(pendingKey) ?? [];
+
+    final alert = {
+      'prediction_id': predictionId,
+      'prediction': {
+        'class_id': classId,
+        'class_name': className,
+        'confidence': confidence,
+        'severity': severity,
+      },
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+    };
+
+    raw.add(jsonEncode(alert));
+
+    await prefs.setStringList(pendingKey, raw);
+
+    debugPrint(
+      'OFFLINE ALERT SAVED. Pending count: ${raw.length}',
+    );
+
+    if (mounted) {
+      message(
+        'Serious issue saved. It will sync with the government system when internet returns.',
+      );
+    }
+  }
+
+  Future<void> _syncPendingAlerts() async {
+    if (syncing) return;
+
+    setStateIfMounted(() {
+      syncing = true;
+    });
+
+    try {
+      final connectivity = await Connectivity().checkConnectivity();
+
+      if (connectivity.contains(ConnectivityResult.none)) {
+        return;
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+
+      final raw = prefs.getStringList(pendingKey) ?? [];
+
+      if (raw.isEmpty) return;
+
+      final remaining = <String>[];
+
+      for (final item in raw) {
+        try {
+          final decoded = jsonDecode(item);
+
+          if (decoded is! Map) {
+            continue;
+          }
+
+          final alert = Map<String, dynamic>.from(decoded);
+
+          final response = await http.post(
+            Uri.parse('$backendUrl/api/government/alert'),
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(alert),
+          ).timeout(
+            const Duration(seconds: 10),
+          );
+
+          if (response.statusCode >= 200 &&
+              response.statusCode < 300) {
+            debugPrint(
+              'PENDING ALERT SYNCED: ${response.body}',
+            );
+          } else {
+            remaining.add(item);
+          }
+        } catch (e) {
+          debugPrint('PENDING ALERT SYNC FAILED: $e');
+          remaining.add(item);
+        }
+      }
+
+      await prefs.setStringList(
+        pendingKey,
+        remaining,
+      );
+
+      if (remaining.isEmpty && raw.isNotEmpty && mounted) {
+        message('Pending government alerts synced successfully.');
+      }
+    } finally {
+      setStateIfMounted(() {
+        syncing = false;
+      });
+    }
+  }
+
+  void setStateIfMounted(VoidCallback callback) {
+    if (mounted) setState(callback);
+  }
+
+  double _toPercent(dynamic value) {
+    if (value == null) return 0;
+
+    double result;
+
+    if (value is num) {
+      result = value.toDouble();
+    } else {
+      result = double.tryParse(value.toString()) ?? 0;
+    }
+
+    if (result > 0 && result <= 1) {
+      result *= 100;
+    }
+
+    return result;
+  }
+
+  void message(String text) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(text)),
+    );
+  }
+
+  void showResult() {
+    final lang = LanguageScope.of(context).value;
+
+    final displayDisease = disease.isEmpty
+        ? 'Unknown'
+        : diseaseLabel(disease, lang);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(28),
+        ),
+      ),
+      builder: (c) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 45,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Center(
+                  child: Icon(
+                    Icons.auto_awesome_rounded,
+                    size: 58,
+                    color: Color(0xFF2E7D32),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Center(
+                  child: Text(
+                    'AI Analysis Complete',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 23,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: analysisMode == 'ONLINE'
+                          ? const Color(0xFFE3F2FD)
+                          : const Color(0xFFE8F5E9),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          analysisMode == 'ONLINE'
+                              ? Icons.cloud_done_rounded
+                              : Icons.offline_bolt_rounded,
+                          size: 18,
+                          color: analysisMode == 'ONLINE'
+                              ? Colors.blue.shade700
+                              : const Color(0xFF2E7D32),
+                        ),
+                        const SizedBox(width: 7),
+                        Text(
+                          analysisMode == 'ONLINE'
+                              ? 'ONLINE AI'
+                              : 'OFFLINE AI',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: analysisMode == 'ONLINE'
+                                ? Colors.blue.shade700
+                                : const Color(0xFF2E7D32),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 22),
+                resultCard(
+                  icon: Icons.local_florist_rounded,
+                  title: 'Detected Disease',
+                  text: displayDisease,
+                ),
+                const SizedBox(height: 12),
+                resultCard(
+                  icon: Icons.speed_rounded,
+                  title: 'AI Confidence',
+                  text: '${confidence.toStringAsFixed(2)}%',
+                ),
+                if (crop.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  resultCard(
+                    icon: Icons.eco_rounded,
+                    title: 'Crop',
+                    text: crop,
+                  ),
+                ],
+                if (severity.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  resultCard(
+                    icon: Icons.warning_amber_rounded,
+                    title: 'Severity',
+                    text: severity,
+                  ),
+                ],
+                if (governmentAlertId.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  resultCard(
+                    icon: Icons.account_balance_rounded,
+                    title: 'Government Alert',
+                    text:
+                        'Alert created successfully.\nID: $governmentAlertId',
+                  ),
+                ] else if (analysisMode == 'OFFLINE' &&
+                    _governmentAlertRequired(
+                      disease,
+                      confidence,
+                      severity,
+                    )) ...[
+                  const SizedBox(height: 12),
+                  resultCard(
+                    icon: Icons.cloud_upload_outlined,
+                    title: 'Government Alert',
+                    text:
+                        'Saved locally and waiting for internet. '
+                        'It will be sent automatically when connectivity returns.',
+                  ),
+                ],
+                if (analysisMode == 'OFFLINE') ...[
+                  const SizedBox(height: 12),
+                  resultCard(
+                    icon: Icons.offline_bolt_rounded,
+                    title: 'Offline Mode',
+                    text:
+                        'Prediction was generated directly on your device. '
+                        'Internet connection was not required.',
+                  ),
+                ],
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(c),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: const Text(
+                      'Done',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget resultCard({
+    required IconData icon,
+    required String title,
+    required String text,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7FAF6),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            icon,
+            color: const Color(0xFF2E7D32),
+            size: 25,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1B5E20),
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  text,
+                  style: const TextStyle(
+                    height: 1.45,
+                    fontSize: 15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _interpreter?.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF4FAF2),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF2E7D32),
+        foregroundColor: Colors.white,
+        title: Text(tr(context, 'disease')),
+        actions: [
+          if (syncing)
+            const Padding(
+              padding: EdgeInsets.only(right: 16),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            )
+          else
+            IconButton(
+              tooltip: 'Sync pending alerts',
+              onPressed: _syncPendingAlerts,
+              icon: const Icon(Icons.sync_rounded),
+            ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            const Icon(
+              Icons.local_florist_rounded,
+              size: 70,
+              color: Color(0xFF2E7D32),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              tr(context, 'disease'),
+              style: const TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1B5E20),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              tr(context, 'help'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 28),
+            Container(
+              width: double.infinity,
+              height: 280,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: const Color(0xFFA5D6A7),
+                ),
+              ),
+              child: image == null
+                  ? Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.add_a_photo_rounded,
+                          size: 65,
+                          color: Color(0xFF66BB6A),
+                        ),
+                        const SizedBox(height: 15),
+                        Text(
+                          tr(context, 'noImage'),
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          tr(context, 'choose'),
+                          style: const TextStyle(
+                            color: Colors.black45,
+                          ),
+                        ),
+                      ],
+                    )
+                  : ClipRRect(
+                      borderRadius: BorderRadius.circular(22),
+                      child: Image.file(
+                        image!,
+                        width: double.infinity,
+                        height: 280,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: analyzing
+                        ? null
+                        : () => choose(ImageSource.camera),
+                    icon: const Icon(Icons.camera_alt_rounded),
+                    label: Text(tr(context, 'camera')),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: analyzing
+                        ? null
+                        : () => choose(ImageSource.gallery),
+                    icon: const Icon(Icons.photo_library_rounded),
+                    label: Text(tr(context, 'gallery')),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: analyzing || modelLoading
+                    ? null
+                    : analyze,
+                icon: analyzing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.auto_awesome_rounded),
+                label: Text(
+                  modelLoading
+                      ? 'Loading 192-class AI model...'
+                      : analyzing
+                          ? 'AI is analyzing image...'
+                          : 'Analyze with AI',
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 17,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.cloud_sync_rounded,
+                    color: Color(0xFF1B5E20),
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Online AI is tried first. If the internet or server '
+                      'is unavailable, the 192-class AI runs on the device. '
+                      'Serious offline detections are saved and synced '
+                      'to the government system when internet returns.',
+                      style: TextStyle(
+                        color: Color(0xFF1B5E20),
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

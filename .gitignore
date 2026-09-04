@@ -1,0 +1,20 @@
+# Python
+backend/venv/
+venv/
+__pycache__/
+*.pyc
+
+# Flutter
+build/
+.dart_tool/
+
+# APK
+*.apk
+
+# IDE
+.vscode/
+.idea/
+
+backend/.env
+
+backend/.env

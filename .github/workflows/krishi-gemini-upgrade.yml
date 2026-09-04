@@ -1,0 +1,81 @@
+name: Krishi Rakshak Gemini Upgrade
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade-api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upgrade /api/advice to Gemini-only
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          import subprocess
+
+          path = Path("api_server.py")
+          text = path.read_text(encoding="utf-8")
+
+          start_marker = "        # ----------------------------------------------------\n        # FIRST: GEMINI AI\n        # ----------------------------------------------------"
+          end_marker = "        # ----------------------------------------------------\n        # RESPONSE\n        # ----------------------------------------------------"
+
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+
+          if start < 0 or end < 0:
+              raise SystemExit("Could not locate /api/advice Gemini/local fallback block")
+
+          replacement = '''        # ----------------------------------------------------
+        # GEMINI ONLY — NO LOCAL AI FALLBACK
+        # ----------------------------------------------------
+        advice = _gemini_advice_details(
+            disease=disease,
+            crop=crop,
+            confidence=confidence,
+            language=language,
+        )
+
+        source = "gemini_ai_advice"
+
+        print(
+            "[AI ADVICE] Gemini advice generated for "
+            f"{disease}"
+        )
+
+'''
+
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text, encoding="utf-8")
+
+          # Verify that the local fallback is no longer inside /api/advice.
+          route_start = text.find('@app.route(\n    "/api/advice"')
+          route_end = text.find('@app.route(', route_start + 1)
+          if route_start < 0:
+              raise SystemExit("/api/advice route not found after edit")
+          section = text[route_start: route_end if route_end > 0 else len(text)]
+          if "source = \"local_ai_advice\"" in section or "_kr_disease_advice(" in section:
+              raise SystemExit("Local advice fallback still present in /api/advice")
+
+          compile(path)
+          subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+          subprocess.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=True)
+          subprocess.run(["git", "add", "api_server.py"], check=True)
+          subprocess.run(["git", "commit", "-m", "Make crop advice Gemini-only"], check=True)
+          subprocess.run(["git", "push", "origin", "HEAD:main"], check=True)
+
+      - name: Remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/krishi-gemini-upgrade.yml
+          git commit -m "Remove temporary upgrade workflow"
+          git push origin HEAD:main

@@ -1,0 +1,14 @@
+{
+  "name": "Crop Disease Detector - Production Model",
+  "version": "1.0",
+  "accuracy": 72.19,
+  "top3_accuracy": 97.0,
+  "classes": 23,
+  "input_shape": [
+    224,
+    224,
+    3
+  ],
+  "description": "Best performing model from testing - 72.19% accuracy",
+  "source": "models\\combined_best_models\\crop_disease_real\\best_model.h5"
+}
