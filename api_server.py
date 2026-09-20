@@ -795,13 +795,25 @@ def predict():
             prediction["confidence"]
         )
 
+        prediction["severity"] = severity
+
+        # Optional weather context supplied by the frontend.
+        weather = get_optional_weather(request.form)
+
+        risk_assessment = calculate_risk_assessment(
+            prediction["class_name"],
+            prediction["confidence"],
+            severity,
+            weather
+        )
+
+        # Keep the existing alert rule intact for backward compatibility.
+        # Risk assessment is added as decision-support context.
         alert_required = government_alert_required(
             prediction["class_name"],
             prediction["confidence"],
             severity
         )
-
-        prediction["severity"] = severity
 
         if is_healthy(
             prediction["class_name"]
@@ -848,6 +860,8 @@ def predict():
                 "status": status,
                 "severity": severity
             },
+
+            "risk_assessment": risk_assessment,
 
             "government_alert": {
                 "required": alert_required,
@@ -1823,6 +1837,7 @@ if __name__ == "__main__":
     print("  GET  /api/health")
     print("  GET  /api/classes")
     print("  POST /api/predict")
+    print("  POST /api/risk-assessment")
     print("  POST /api/government/alert")
     print("  GET  /api/government/alerts")
     print("  GET  /api/government/alerts/<alert_id>")
