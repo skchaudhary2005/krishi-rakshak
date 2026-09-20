@@ -8,6 +8,7 @@ import AIChat from './pages/AIChat';
 import Result from './pages/Result';
 import Experts from './pages/Experts';
 import About from './pages/About';
+import Hotspots from './pages/Hotspots';
 
 import './App.css';
 
@@ -173,6 +174,11 @@ function App() {
             <Route
               path="/about"
               element={<About />}
+            />
+
+            <Route
+              path="/hotspots"
+              element={<Hotspots />}
             />
 
             {/* Unknown URL → Home */}
