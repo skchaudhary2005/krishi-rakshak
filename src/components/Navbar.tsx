@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, LayoutDashboard, MessageSquare, Users, Info, Globe } from 'lucide-react';
+import { Home, LayoutDashboard, MessageSquare, Users, Info, Globe, MapPin } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import type { Language } from '../translations';
 
@@ -10,6 +10,7 @@ const Navbar = () => {
   const navItems = [
     { path: '/home', icon: Home, label: t('home') },
     { path: '/dashboard', icon: LayoutDashboard, label: t('dashboard') },
+    { path: '/hotspots', icon: MapPin, label: 'Hotspots' },
     { path: '/ai-chat', icon: MessageSquare, label: t('aiChat') },
     { path: '/experts', icon: Users, label: t('experts') },
     { path: '/about', icon: Info, label: t('about') },
