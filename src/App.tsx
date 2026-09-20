@@ -9,6 +9,7 @@ import Result from './pages/Result';
 import Experts from './pages/Experts';
 import About from './pages/About';
 import Hotspots from './pages/Hotspots';
+import PestDetection from './pages/PestDetection';
 
 import './App.css';
 
@@ -179,6 +180,11 @@ function App() {
             <Route
               path="/hotspots"
               element={<Hotspots />}
+            />
+
+            <Route
+              path="/pest-detection"
+              element={<PestDetection />}
             />
 
             {/* Unknown URL → Home */}
