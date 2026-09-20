@@ -454,6 +454,121 @@ def government_alert_required(
 
 
 # ============================================================
+# RISK ASSESSMENT ENGINE (V1)
+# ============================================================
+# Transparent rule-based prototype. This is NOT an agronomic prediction model.
+# It combines model confidence, disease severity, and optional weather signals.
+
+
+def calculate_risk_assessment(class_name, confidence, severity, weather=None):
+    """Return a transparent 0-100 risk score and explainable contributing factors."""
+    weather = weather or {}
+
+    try:
+        confidence = max(0.0, min(100.0, float(confidence)))
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    if is_healthy(class_name):
+        return {
+            "score": 0.0,
+            "level": "low",
+            "factors": [{"name": "healthy_prediction", "impact": 0, "detail": "The detected class is marked healthy."}],
+            "method": "rule_based_v1",
+            "validated": False
+        }
+
+    severity_points = {
+        "none": 0.0,
+        "low": 25.0,
+        "medium": 60.0,
+        "high": 90.0
+    }.get(str(severity).lower(), 25.0)
+
+    # Disease confidence is the strongest signal available from the current model.
+    score = confidence * 0.55 + severity_points * 0.30
+    factors = [
+        {"name": "model_confidence", "impact": round(confidence * 0.55, 2), "detail": f"Prediction confidence is {confidence:.2f}%"},
+        {"name": "disease_severity", "impact": round(severity_points * 0.30, 2), "detail": f"Current severity is {severity}"}
+    ]
+
+    weather_score = 0.0
+    try:
+        humidity = float(weather.get("humidity")) if weather.get("humidity") is not None else None
+        rainfall = float(weather.get("rainfall")) if weather.get("rainfall") is not None else None
+    except (TypeError, ValueError):
+        humidity, rainfall = None, None
+
+    if humidity is not None:
+        humidity_points = 20.0 if humidity >= 80 else 10.0 if humidity >= 60 else 0.0
+        weather_score += humidity_points
+        factors.append({"name": "humidity", "impact": round(humidity_points * 0.10, 2), "detail": f"Humidity is {humidity:.1f}%"})
+
+    if rainfall is not None:
+        rainfall_points = 15.0 if rainfall > 10 else 8.0 if rainfall > 2 else 0.0
+        weather_score += rainfall_points
+        factors.append({"name": "rainfall", "impact": round(rainfall_points * 0.10, 2), "detail": f"Rainfall is {rainfall:.1f} mm"})
+
+    # Weather contributes only when supplied; keep the final score bounded.
+    score += min(20.0, weather_score * 0.10)
+    score = round(max(0.0, min(100.0, score)), 2)
+
+    level = "high" if score >= 65 else "medium" if score >= 35 else "low"
+
+    return {
+        "score": score,
+        "level": level,
+        "factors": factors,
+        "method": "rule_based_v1",
+        "validated": False
+    }
+
+
+def get_optional_weather(data):
+    def parse_float(value):
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "temperature": parse_float(data.get("temperature")),
+        "humidity": parse_float(data.get("humidity")),
+        "rainfall": parse_float(data.get("rainfall")),
+        "condition": data.get("weather_condition") or data.get("condition")
+    }
+
+
+@app.route("/api/risk-assessment", methods=["POST"])
+def risk_assessment():
+    """Calculate explainable crop disease risk from an existing prediction context."""
+    try:
+        data = request.get_json(silent=True) or {}
+        prediction = data.get("prediction") or data
+        class_name = str(prediction.get("class_name") or prediction.get("disease") or "unknown disease")
+        confidence = prediction.get("confidence", 0)
+        severity = prediction.get("severity", calculate_severity(class_name, float(confidence or 0)))
+        weather = data.get("weather") or {}
+
+        result = calculate_risk_assessment(class_name, confidence, severity, weather)
+        return jsonify({
+            "success": True,
+            "prediction": {
+                "class_name": class_name,
+                "confidence": float(confidence or 0),
+                "severity": severity
+            },
+            "weather": weather,
+            "risk_assessment": result,
+            "disclaimer": "Rule-based prototype for decision support; not a validated agronomic risk forecast."
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+# ============================================================
 # LOCATION EXTRACTION
 # ============================================================
 
