@@ -1855,6 +1855,149 @@ def consultants():
 
 
 # ============================================================
+# PEST DETECTION (YOLO)
+# ============================================================
+# Optional custom Ultralytics model. Put trained weights at:
+# public/models/pest/best.pt
+# Or set PEST_MODEL_PATH to another .pt path.
+try:
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
+except Exception:
+    YOLO = None
+    YOLO_AVAILABLE = False
+
+PEST_MODEL_PATH = os.environ.get(
+    "PEST_MODEL_PATH",
+    os.path.join(BASE_DIR, "public", "models", "pest", "best.pt")
+)
+_pest_model = None
+
+
+def load_pest_model():
+    global _pest_model
+
+    if not YOLO_AVAILABLE:
+        return False
+
+    if not os.path.exists(PEST_MODEL_PATH):
+        return False
+
+    _pest_model = YOLO(PEST_MODEL_PATH)
+    print(f"[PEST] YOLO model loaded: {PEST_MODEL_PATH}")
+    return True
+
+
+def detect_pests(image_file, confidence_threshold=0.25):
+    if not YOLO_AVAILABLE:
+        raise RuntimeError(
+            "Ultralytics is not installed. Install it with: pip install ultralytics"
+        )
+
+    global _pest_model
+    if _pest_model is None:
+        if not load_pest_model():
+            raise FileNotFoundError(
+                f"Pest YOLO weights not found: {PEST_MODEL_PATH}. "
+                "Place a trained best.pt file there or set PEST_MODEL_PATH."
+            )
+
+    image_file.stream.seek(0)
+    results = _pest_model.predict(
+        source=image_file.stream,
+        conf=float(confidence_threshold),
+        verbose=False
+    )
+
+    detections = []
+    if results:
+        result = results[0]
+        names = result.names or {}
+
+        if result.boxes is not None:
+            for box in result.boxes:
+                cls_id = int(box.cls[0].item())
+                conf = float(box.conf[0].item())
+                xyxy = [round(float(v), 2) for v in box.xyxy[0].tolist()]
+                detections.append({
+                    "class_id": cls_id,
+                    "class_name": str(names.get(cls_id, cls_id)),
+                    "confidence": round(conf * 100, 2),
+                    "bbox": xyxy
+                })
+
+    detections.sort(key=lambda x: x["confidence"], reverse=True)
+
+    return {
+        "detected": len(detections) > 0,
+        "count": len(detections),
+        "detections": detections,
+        "model": os.path.basename(PEST_MODEL_PATH),
+        "model_type": "YOLO"
+    }
+
+
+@app.route("/api/pest-detect", methods=["POST"])
+def pest_detect():
+    try:
+        image = request.files.get("image")
+        if image is None:
+            return jsonify({
+                "success": False,
+                "error": "image file is required"
+            }), 400
+
+        threshold = request.form.get("confidence", "0.25")
+        try:
+            threshold = max(0.05, min(0.95, float(threshold)))
+        except ValueError:
+            threshold = 0.25
+
+        result = detect_pests(image, threshold)
+
+        return jsonify({
+            "success": True,
+            **result
+        }), 200
+
+    except FileNotFoundError as e:
+        return jsonify({
+            "success": False,
+            "configured": False,
+            "error": str(e),
+            "next_step": "Add a trained YOLO pest model as public/models/pest/best.pt"
+        }), 503
+
+    except RuntimeError as e:
+        return jsonify({
+            "success": False,
+            "configured": False,
+            "error": str(e)
+        }), 503
+
+    except Exception as e:
+        print(f"[PEST DETECTION ERROR] {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/api/pest-detect/status", methods=["GET"])
+def pest_detect_status():
+    configured = bool(
+        YOLO_AVAILABLE and os.path.exists(PEST_MODEL_PATH)
+    )
+    return jsonify({
+        "success": True,
+        "configured": configured,
+        "yolo_installed": YOLO_AVAILABLE,
+        "model_path": PEST_MODEL_PATH,
+        "model_exists": os.path.exists(PEST_MODEL_PATH)
+    }), 200
+
+
+# ============================================================
 # STARTUP
 # ============================================================
 def initialize_application():
@@ -1936,6 +2079,8 @@ if __name__ == "__main__":
     print("  GET  /api/health")
     print("  GET  /api/classes")
     print("  POST /api/predict")
+    print("  POST /api/pest-detect")
+    print("  GET  /api/pest-detect/status")
     print("  POST /api/risk-assessment")
     print("  GET  /api/hotspots")
     print("  GET  /api/hotspots/summary")
