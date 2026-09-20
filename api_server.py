@@ -890,6 +890,105 @@ def predict():
 
 
 # ============================================================
+# HOTSPOTS / GIS AGGREGATION
+# ============================================================
+
+@app.route("/api/hotspots", methods=["GET"])
+def get_hotspots():
+    """Return aggregated disease hotspots from stored government alerts."""
+    try:
+        state = request.args.get("state")
+        district = request.args.get("district")
+        disease = request.args.get("disease")
+        severity = request.args.get("severity")
+        limit = request.args.get("limit", default=100, type=int)
+        limit = max(1, min(limit, 500))
+
+        where = ["1=1"]
+        params = []
+        for column, value in (("state", state), ("district", district), ("disease", disease), ("severity", severity)):
+            if value:
+                where.append(f"LOWER({column}) = LOWER(?)")
+                params.append(value)
+
+        conn = get_db()
+        rows = conn.execute(f"""
+            SELECT state, district, disease, severity,
+                   COUNT(*) AS alert_count,
+                   ROUND(AVG(confidence), 2) AS avg_confidence,
+                   ROUND(AVG(latitude), 6) AS latitude,
+                   ROUND(AVG(longitude), 6) AS longitude,
+                   MIN(created_at) AS first_seen,
+                   MAX(created_at) AS last_seen
+            FROM government_alerts
+            WHERE {' AND '.join(where)}
+            GROUP BY state, district, disease, severity
+            ORDER BY alert_count DESC, last_seen DESC
+            LIMIT ?
+        """, (*params, limit)).fetchall()
+        conn.close()
+
+        hotspots = []
+        for row in rows:
+            hotspots.append({
+                "state": row["state"],
+                "district": row["district"],
+                "disease": row["disease"],
+                "severity": row["severity"],
+                "alert_count": row["alert_count"],
+                "avg_confidence": row["avg_confidence"],
+                "location": {"latitude": row["latitude"], "longitude": row["longitude"]},
+                "first_seen": row["first_seen"],
+                "last_seen": row["last_seen"]
+            })
+
+        return jsonify({
+            "success": True,
+            "count": len(hotspots),
+            "hotspots": hotspots,
+            "filters": {"state": state, "district": district, "disease": disease, "severity": severity}
+        }), 200
+    except Exception as e:
+        print(f"[HOTSPOT ERROR] {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/hotspots/summary", methods=["GET"])
+def hotspot_summary():
+    """Return dashboard-ready totals and severity distribution."""
+    try:
+        conn = get_db()
+        totals = conn.execute("""
+            SELECT COUNT(*) AS total_alerts,
+                   COUNT(DISTINCT disease) AS diseases,
+                   COUNT(DISTINCT state) AS states,
+                   COUNT(DISTINCT district) AS districts,
+                   ROUND(AVG(confidence), 2) AS avg_confidence
+            FROM government_alerts
+        """).fetchone()
+        severity_rows = conn.execute("""
+            SELECT severity, COUNT(*) AS count
+            FROM government_alerts
+            GROUP BY severity
+        """).fetchall()
+        conn.close()
+
+        return jsonify({
+            "success": True,
+            "summary": {
+                "total_alerts": totals["total_alerts"],
+                "diseases": totals["diseases"],
+                "states": totals["states"],
+                "districts": totals["districts"],
+                "avg_confidence": totals["avg_confidence"]
+            },
+            "severity_distribution": {row["severity"]: row["count"] for row in severity_rows}
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ============================================================
 # MANUAL GOVERNMENT ALERT
 # ============================================================
 
@@ -1838,6 +1937,8 @@ if __name__ == "__main__":
     print("  GET  /api/classes")
     print("  POST /api/predict")
     print("  POST /api/risk-assessment")
+    print("  GET  /api/hotspots")
+    print("  GET  /api/hotspots/summary")
     print("  POST /api/government/alert")
     print("  GET  /api/government/alerts")
     print("  GET  /api/government/alerts/<alert_id>")
