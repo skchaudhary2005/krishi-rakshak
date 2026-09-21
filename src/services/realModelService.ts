@@ -232,7 +232,7 @@ class RealModelService {
 
       console.log(
         '✅ Prediction received:',
-        data.prediction.disease
+        data.prediction.class_name
       );
 
       const className = data.prediction.class_name;
