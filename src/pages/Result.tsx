@@ -1,9 +1,11 @@
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { CheckCircle, AlertCircle, ArrowLeft, Phone, Zap, Sparkles, Clock } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import type { DiseaseResult } from '../services/diseaseApi';
 import Navbar from '../components/Navbar';
+import { getCurrentWeather, getUserLocation } from '../services/weatherService';
 
 const Result = () => {
   const location = useLocation();
@@ -16,7 +18,53 @@ const Result = () => {
     return null;
   }
 
+
   const isHealthy = result.disease.toLowerCase().includes('healthy');
+  const [unified, setUnified] = useState<{
+    overall_assessment: { score: number; level: string; label: string; recommended_actions: string[] };
+    pest: { count: number; detections: Array<{ class_name: string; confidence: number }>; risk_assessment?: { score: number; level: string; label: string } };
+    weather: { temperature?: number; humidity?: number; rainfall?: number };
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const runUnifiedAssessment = async () => {
+      try {
+        const blob = await fetch(image).then((r) => r.blob());
+        const form = new FormData();
+        form.append('image', new File([blob], 'crop.jpg', { type: blob.type || 'image/jpeg' }));
+        form.append('disease', result.mlPrediction?.disease || result.disease);
+        form.append('disease_confidence', String(result.mlPrediction?.confidence ?? result.confidence));
+
+        let weather: Record<string, number | string> = {};
+        try {
+          const coords = await getUserLocation();
+          const current = await getCurrentWeather(coords);
+          weather = {
+            temperature: current.temp,
+            humidity: current.humidity,
+            rainfall: current.rainfall,
+            condition: current.condition,
+          };
+        } catch {
+          // Weather is optional; disease + pest assessment still works.
+        }
+        form.append('weather', JSON.stringify(weather));
+
+        const response = await fetch('http://127.0.0.1:5000/api/unified-assessment', {
+          method: 'POST',
+          body: form,
+        });
+        const data = await response.json();
+        if (!cancelled && response.ok && data.success) setUnified(data);
+      } catch (error) {
+        console.error('Unified assessment failed:', error);
+      }
+    };
+    runUnifiedAssessment();
+    return () => { cancelled = true; };
+  }, [image, result]);
+
 
   return (
     <div className="min-h-screen">
@@ -92,6 +140,43 @@ const Result = () => {
               )}
             </div>
           </div>
+
+
+          {unified && (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-5 rounded-xl border-2 border-primary-200 bg-primary-50"
+            >
+              <h3 className="text-xl font-bold text-primary-900 mb-4">🌾 Unified Crop Health Assessment</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="bg-white rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Overall Risk</p>
+                  <p className="font-bold text-lg">{unified.overall_assessment.label}</p>
+                  <p className="text-primary-700 font-semibold">{unified.overall_assessment.score}/100</p>
+                </div>
+                <div className="bg-white rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Pest Scan</p>
+                  <p className="font-bold text-lg">{unified.pest.count} detected</p>
+                  <p className="text-gray-600 text-sm">{unified.pest.risk_assessment?.label || 'No pest risk'}</p>
+                </div>
+                <div className="bg-white rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Weather Context</p>
+                  <p className="font-semibold">{unified.weather.temperature ?? '—'}°C · {unified.weather.humidity ?? '—'}% humidity</p>
+                  <p className="text-gray-600 text-sm">{unified.weather.rainfall ?? '—'} mm rainfall</p>
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className="font-bold text-gray-800 mb-2">Recommended actions</p>
+                <ol className="space-y-1 text-sm text-gray-700">
+                  {unified.overall_assessment.recommended_actions.map((action, index) => (
+                    <li key={index}>{index + 1}. {action}</li>
+                  ))}
+                </ol>
+              </div>
+              <p className="text-xs text-gray-500 mt-4">Explainable rule-based decision support; not a validated agronomic forecast.</p>
+            </motion.div>
+          )}
 
           {/* ML Model Detection Results */}
           {result.mlPrediction && (
