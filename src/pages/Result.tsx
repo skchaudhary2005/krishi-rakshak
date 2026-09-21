@@ -13,7 +13,6 @@ const Result = () => {
   const { t } = useLanguage();
   const { result, image } = location.state as { result: DiseaseResult; image: string };
   const [unified, setUnified] = useState<{
-    overall_assessment: { score: number; level: string; label: string; recommended_actions: string[] };
     pest: { count: number; detections: Array<{ class_name: string; confidence: number }>; risk_assessment?: { score: number; level: string; label: string } };
     weather: { temperature?: number; humidity?: number; rainfall?: number };
     overall_assessment: {
