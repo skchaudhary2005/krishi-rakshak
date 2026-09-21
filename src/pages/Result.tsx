@@ -12,14 +12,6 @@ const Result = () => {
   const navigate = useNavigate();
   const { t } = useLanguage();
   const { result, image } = location.state as { result: DiseaseResult; image: string };
-
-  if (!result) {
-    navigate('/home');
-    return null;
-  }
-
-
-  const isHealthy = result.disease.toLowerCase().includes('healthy');
   const [unified, setUnified] = useState<{
     overall_assessment: { score: number; level: string; label: string; recommended_actions: string[] };
     pest: { count: number; detections: Array<{ class_name: string; confidence: number }>; risk_assessment?: { score: number; level: string; label: string } };
@@ -51,7 +43,7 @@ const Result = () => {
         }
         form.append('weather', JSON.stringify(weather));
 
-        const response = await fetch('http://127.0.0.1:5000/api/unified-assessment', {
+        const response = await fetch((import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000') + '/api/unified-assessment', {
           method: 'POST',
           body: form,
         });
@@ -65,6 +57,12 @@ const Result = () => {
     return () => { cancelled = true; };
   }, [image, result]);
 
+  if (!result) {
+    navigate('/home');
+    return null;
+  }
+
+  const isHealthy = result.disease.toLowerCase().includes('healthy');
 
   return (
     <div className="min-h-screen">
