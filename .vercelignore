@@ -1,0 +1,19 @@
+# Vercel deploys the React/Vite frontend only. Flask runs on Render.
+requirements.txt
+api_server.py
+.python-version
+*.py
+datasets/
+runs/
+.venv/
+venv/
+__pycache__/
+*.pt
+*.pth
+*.h5
+*.keras
+*.tflite
+*.db
+*.sqlite
+*.sqlite3
+public/models/
