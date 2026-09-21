@@ -13,15 +13,6 @@ export default defineConfig({
     }),
   ],
   build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          animation: ['framer-motion'],
-          icons: ['lucide-react', 'react-icons'],
-        },
-      },
-    },
-    chunkSizeWarningLimit: 700,
+    chunkSizeWarningLimit: 1200,
   },
 })
