@@ -1889,9 +1889,63 @@ def unified_assessment():
         pest_result = detect_pests(image, 0.25)
         pest_risk = pest_result.get("risk_assessment") or assess_pest_risk(pest_result.get("detections", []))
 
-        scores = [float(disease_risk.get("score", 0)), float(pest_risk.get("score", 0))]
-        overall_score = round(max(scores), 2)
+        # Transparent prototype combination:
+        # disease = 50%, pest = 30%, weather = 20%.
+        # If weather is unavailable, renormalize the available disease/pest signals.
+        disease_score = max(0.0, min(100.0, float(disease_risk.get("score", 0))))
+        pest_score = max(0.0, min(100.0, float(pest_risk.get("score", 0))))
+
+        weather_score = 0.0
+        weather_factors = []
+        humidity = weather.get("humidity")
+        rainfall = weather.get("rainfall")
+        try:
+            if humidity is not None:
+                humidity = float(humidity)
+                if humidity >= 80:
+                    weather_score += 60.0
+                    weather_factors.append("high humidity")
+                elif humidity >= 60:
+                    weather_score += 30.0
+                    weather_factors.append("moderate humidity")
+            if rainfall is not None:
+                rainfall = float(rainfall)
+                if rainfall > 10:
+                    weather_score += 40.0
+                    weather_factors.append("recent rainfall")
+                elif rainfall > 2:
+                    weather_score += 20.0
+                    weather_factors.append("some rainfall")
+            weather_score = min(100.0, weather_score)
+        except (TypeError, ValueError):
+            weather_score = 0.0
+            weather_factors = []
+
+        weighted_parts = [(disease_score, 0.50), (pest_score, 0.30)]
+        if humidity is not None or rainfall is not None:
+            weighted_parts.append((weather_score, 0.20))
+        weight_total = sum(weight for _, weight in weighted_parts)
+        overall_score = round(
+            sum(score * weight for score, weight in weighted_parts) / weight_total,
+            2
+        )
         overall_level = "high" if overall_score >= 70 else "medium" if overall_score >= 40 else "low"
+
+        # Signal-strength indicator is deliberately separate from risk score.
+        # Model confidence is evidence strength, not a validated probability.
+        pest_confidences = [
+            float(d.get("confidence", 0)) for d in pest_result.get("detections", [])
+        ]
+        pest_signal = max(pest_confidences) if pest_confidences else 0.0
+        signal_values = [disease_conf_pct]
+        if pest_confidences:
+            signal_values.append(pest_signal)
+        signal_strength = round(sum(signal_values) / len(signal_values), 2)
+        signal_band = (
+            "strong" if signal_strength >= 80
+            else "moderate" if signal_strength >= 60
+            else "weak"
+        )
 
         actions = []
         if disease_risk.get("score", 0) > 0:
@@ -1926,7 +1980,17 @@ def unified_assessment():
                 "level": overall_level,
                 "label": overall_level.title() + " overall crop health risk",
                 "recommended_actions": actions,
-                "method": "unified_rule_based_v1",
+                "signal_strength": {
+                    "score": signal_strength,
+                    "band": signal_band,
+                    "note": "Model confidence is an evidence-strength signal, not a calibrated probability."
+                },
+                "components": {
+                    "disease": {"score": round(disease_score, 2), "weight": 0.50},
+                    "pest": {"score": round(pest_score, 2), "weight": 0.30},
+                    "weather": {"score": round(weather_score, 2), "weight": 0.20, "factors": weather_factors}
+                },
+                "method": "unified_weighted_rule_based_v2",
                 "validated": False
             },
             "disclaimer": "Unified risk is an explainable rule-based prototype using model outputs and supplied weather signals; it is not a validated agronomic forecast."
