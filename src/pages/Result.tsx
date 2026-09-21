@@ -110,7 +110,7 @@ const Result = () => {
                   {result.detectionMethod.includes('REAL-ML') && (
                     <span className="inline-flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-xs font-semibold rounded-full">
                       <Zap size={12} />
-                      90%+ Trained Model
+                      ML Model Active
                     </span>
                   )}
                   {result.detectionMethod.includes('ML') && !result.detectionMethod.includes('REAL-ML') && (
