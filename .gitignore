@@ -38,3 +38,6 @@ yolo11n.pt
 datasets/raw/
 datasets/unified/
 datasets/pest/
+api_server.py.before_ai.bak
+datasets/
+pest_labels.txt
