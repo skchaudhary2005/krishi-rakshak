@@ -825,30 +825,20 @@ const Dashboard = () => {
             <div className="mt-7 text-center rounded-2xl bg-gradient-to-br from-green-50 to-emerald-50 p-6">
 
               <p className="text-sm text-gray-500">
-                Validation Accuracy
+                Model Status
               </p>
 
-              <p className="text-5xl font-extrabold text-green-600 mt-2">
-                95.14%
+              <p className="text-3xl font-extrabold text-green-600 mt-2">
+                READY
               </p>
 
-              <div className="mt-4 h-2 rounded-full bg-green-100 overflow-hidden">
+              <p className="text-sm text-gray-600 mt-2">
+                192-class disease model loaded for prediction.
+              </p>
 
-                <motion.div
-                  initial={{
-                    width: 0,
-                  }}
-                  animate={{
-                    width: '95.14%',
-                  }}
-                  transition={{
-                    duration: 1.2,
-                    ease: 'easeOut',
-                  }}
-                  className="h-full rounded-full bg-green-500"
-                />
-
-              </div>
+              <p className="text-xs text-gray-500 mt-3">
+                Displayed confidence is model output, not a validated probability.
+              </p>
 
             </div>
 
