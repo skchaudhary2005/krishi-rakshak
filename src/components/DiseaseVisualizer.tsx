@@ -51,7 +51,7 @@ const DiseaseVisualizer: React.FC<DiseaseVisualizerProps> = ({ image, result }) 
     img.src = image;
   };
 
-  const drawBoundingBoxes = (ctx: CanvasRenderingContext2D, regions: any[]) => {
+  const drawBoundingBoxes = (ctx: CanvasRenderingContext2D, regions: DiseaseRegion[]) => {
     regions.forEach((region) => {
       // Get color based on severity
       const color = getSeverityColor(region.severity);
