@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { CheckCircle, AlertCircle, ArrowLeft, Phone, Zap, Sparkles, Clock } from 'lucide-react';
+import { CheckCircle, AlertCircle, ArrowLeft, Phone, Zap, Sparkles, Clock, ShieldCheck } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import type { DiseaseResult } from '../services/diseaseApi';
 import Navbar from '../components/Navbar';
@@ -16,6 +16,18 @@ const Result = () => {
     overall_assessment: { score: number; level: string; label: string; recommended_actions: string[] };
     pest: { count: number; detections: Array<{ class_name: string; confidence: number }>; risk_assessment?: { score: number; level: string; label: string } };
     weather: { temperature?: number; humidity?: number; rainfall?: number };
+    overall_assessment: {
+      score: number;
+      level: string;
+      label: string;
+      recommended_actions: string[];
+      signal_strength?: { score: number; band: string; note: string };
+      components?: {
+        disease: { score: number; weight: number };
+        pest: { score: number; weight: number };
+        weather: { score: number; weight: number; factors: string[] };
+      };
+    };
   } | null>(null);
 
   useEffect(() => {
@@ -164,6 +176,19 @@ const Result = () => {
                   <p className="text-gray-600 text-sm">{unified.weather.rainfall ?? '—'} mm rainfall</p>
                 </div>
               </div>
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="bg-white rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Evidence strength</p>
+                  <p className="font-bold capitalize">{unified.overall_assessment.signal_strength?.band || '—'}</p>
+                  <p className="text-sm text-gray-600">{unified.overall_assessment.signal_strength?.score ?? '—'}% combined model signal</p>
+                </div>
+                <div className="bg-white rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Risk components</p>
+                  <p className="text-sm text-gray-700">
+                    Disease {unified.overall_assessment.components?.disease.score ?? '—'} · Pest {unified.overall_assessment.components?.pest.score ?? '—'} · Weather {unified.overall_assessment.components?.weather.score ?? '—'}
+                  </p>
+                </div>
+              </div>
               <div className="mt-4">
                 <p className="font-bold text-gray-800 mb-2">Recommended actions</p>
                 <ol className="space-y-1 text-sm text-gray-700">
@@ -214,14 +239,15 @@ const Result = () => {
           <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 rounded-xl">
             <h3 className="font-bold text-purple-900 flex items-center gap-2">
               <Sparkles className="text-purple-600" size={20} />
-              🏥 AI Medical Analysis & Treatment Plan
+              🏥 AI Crop Analysis & Treatment Plan
             </h3>
-            <p className="text-xs text-purple-700 mt-1">Detailed recommendations powered by Gemini AI</p>
+            <p className="text-xs text-purple-700 mt-1">Detailed crop-care recommendations powered by AI</p>
           </div>
 
           <div className="space-y-6">
             <div>
               <h3 className="text-xl font-bold text-primary-800 mb-3 flex items-center gap-2">
+                <ShieldCheck size={20} />
                 💊 {t('treatment')}
               </h3>
               <ul className="space-y-2">
