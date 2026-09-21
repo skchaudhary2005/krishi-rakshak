@@ -1,20 +1,40 @@
 # Python
-backend/venv/
 venv/
+backend/venv/
 __pycache__/
 *.pyc
 
-# Flutter
-build/
-.dart_tool/
+# Environment / secrets
+.env
+backend/.env
 
-# APK
-*.apk
+# Node
+node_modules/
+models/node_modules/
+
+# Build
+build/
+dist/
+.dart_tool/
 
 # IDE
 .vscode/
 .idea/
 
-backend/.env
+# APK
+*.apk
 
-backend/.env
+# Local database
+krishi_rakshak.db
+instance/
+
+# Training artifacts
+runs/
+weights/
+tf_old/
+yolo11n.pt
+
+# Large local datasets
+datasets/raw/
+datasets/unified/
+datasets/pest/
