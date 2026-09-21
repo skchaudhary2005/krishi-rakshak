@@ -31,16 +31,17 @@ interface PredictionResponse {
   success?: boolean;
   error?: string;
   prediction?: {
-    disease: string;
-    crop: string;
+    class_id: number;
+    class_name: string;
     confidence: number;
-    isHealthy: boolean;
-    topPredictions: Array<{
-      disease: string;
-      crop: string;
-      confidence: number;
-    }>;
+    status: string;
+    severity: string;
   };
+  top_predictions?: Array<{
+    class_id: number;
+    class_name: string;
+    confidence: number;
+  }>;
 }
 
 class RealModelService {
@@ -130,7 +131,7 @@ class RealModelService {
       const data: HealthResponse =
         await response.json();
 
-      if (data.status !== 'healthy') {
+      if (data.status !== 'healthy' && data.status !== 'ok') {
         throw new Error(
           'Model API is not healthy'
         );
@@ -234,21 +235,23 @@ class RealModelService {
         data.prediction.disease
       );
 
+      const className = data.prediction.class_name;
+      const isHealthy = /healthy|normal/i.test(className);
+      const confidence = Math.max(
+        0,
+        Math.min(1, Number(data.prediction.confidence || 0) / 100)
+      );
+
       return {
-        disease:
-          data.prediction.disease,
-
-        crop:
-          data.prediction.crop,
-
-        confidence:
-          data.prediction.confidence,
-
-        isHealthy:
-          data.prediction.isHealthy,
-
-        topPredictions:
-          data.prediction.topPredictions,
+        disease: className,
+        crop: className.split(/\s+/)[0] || 'Unknown',
+        confidence,
+        isHealthy,
+        topPredictions: (data.top_predictions || []).map((item) => ({
+          disease: item.class_name,
+          crop: item.class_name.split(/\s+/)[0] || 'Unknown',
+          confidence: Math.max(0, Math.min(1, Number(item.confidence || 0) / 100)),
+        })),
       };
 
     } catch (error) {
