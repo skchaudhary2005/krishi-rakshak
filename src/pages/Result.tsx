@@ -119,8 +119,8 @@ const Result = () => {
                 </div>
                 <div className="bg-white p-3 rounded-lg">
                   <p className="text-gray-600 font-semibold">Health Status</p>
-                  <p className={`font-bold text-lg ${result.mlPrediction.isHealthy ? 'text-green-600' : 'text-orange-600'}`}>
-                    {result.mlPrediction.isHealthy ? '✅ Healthy' : '⚠️ Diseased'}
+                  <p className={`font-bold text-lg ${result.mlPrediction.disease.toLowerCase().includes('healthy') ? 'text-green-600' : 'text-orange-600'}`}>
+                    {result.mlPrediction.disease.toLowerCase().includes('healthy') ? 'text-green-600' : 'text-orange-600'}
                   </p>
                 </div>
               </div>
