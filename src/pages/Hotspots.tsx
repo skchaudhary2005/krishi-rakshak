@@ -29,9 +29,13 @@ const Hotspots = () => {
         <p className="mt-2 max-w-2xl text-green-50">Aggregated disease alerts from Krishi Rakshak scans, ready for GIS visualization and government monitoring.</p>
       </div><button onClick={loadData} className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 font-semibold text-green-800 hover:bg-green-50"><RefreshCw size={18}/>Refresh</button></div>
     </section>
-    {summary&&<section className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">{[
-      ['Total Alerts',summary.total_alerts,Activity],['Diseases',summary.diseases,ShieldAlert],['States',summary.states,MapPin],['Districts',summary.districts,MapPin],['Avg Confidence',(summary.avg_confidence??0)+'%',Activity]
-    ].map(([label,value,Icon])=><div key={String(label)} className="rounded-2xl bg-white p-5 shadow-sm border border-gray-100"><Icon className="text-green-600 mb-3" size={22}/><p className="text-sm text-gray-500">{label}</p><p className="text-2xl font-extrabold text-gray-900">{value}</p></div>)}</section>}
+    {summary&&<section className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+      <div className="rounded-2xl bg-white p-5 shadow-sm border border-gray-100"><Activity className="text-green-600 mb-3" size={22}/><p className="text-sm text-gray-500">Total Alerts</p><p className="text-2xl font-extrabold text-gray-900">{summary.total_alerts}</p></div>
+      <div className="rounded-2xl bg-white p-5 shadow-sm border border-gray-100"><ShieldAlert className="text-green-600 mb-3" size={22}/><p className="text-sm text-gray-500">Diseases</p><p className="text-2xl font-extrabold text-gray-900">{summary.diseases}</p></div>
+      <div className="rounded-2xl bg-white p-5 shadow-sm border border-gray-100"><MapPin className="text-green-600 mb-3" size={22}/><p className="text-sm text-gray-500">States</p><p className="text-2xl font-extrabold text-gray-900">{summary.states}</p></div>
+      <div className="rounded-2xl bg-white p-5 shadow-sm border border-gray-100"><MapPin className="text-green-600 mb-3" size={22}/><p className="text-sm text-gray-500">Districts</p><p className="text-2xl font-extrabold text-gray-900">{summary.districts}</p></div>
+      <div className="rounded-2xl bg-white p-5 shadow-sm border border-gray-100"><Activity className="text-green-600 mb-3" size={22}/><p className="text-sm text-gray-500">Avg Confidence</p><p className="text-2xl font-extrabold text-gray-900">{summary.avg_confidence ?? 0}%</p></div>
+    </section>}
     {loading&&<div className="rounded-2xl bg-white p-10 text-center shadow-sm">Loading hotspot data...</div>}
     {error&&!loading&&<div className="rounded-2xl bg-red-50 border border-red-200 p-5 text-red-700 flex items-center gap-3"><AlertTriangle size={22}/>{error}. Make sure Flask is running on port 5000.</div>}
     {!loading&&!error&&hotspots.length===0&&<div className="rounded-2xl bg-white p-10 text-center shadow-sm text-gray-500">No government alerts with location data have been recorded yet.</div>}

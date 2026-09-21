@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import type { AdvancedDetectionResult } from '../services/advancedMLService';
+type DiseaseRegion = { x:number; y:number; width:number; height:number; severity:string; confidence:number }; type AdvancedDetectionResult = { heatmapData?: number[][]; diseaseRegions: DiseaseRegion[] };
 
 interface DiseaseVisualizerProps {
   image: string;
@@ -46,13 +46,13 @@ const DiseaseVisualizer: React.FC<DiseaseVisualizerProps> = ({ image, result }) 
       }
 
       // Draw legend
-      drawLegend(ctx, img.width, img.height);
+      drawLegend(ctx, img.width);
     };
     img.src = image;
   };
 
   const drawBoundingBoxes = (ctx: CanvasRenderingContext2D, regions: any[]) => {
-    regions.forEach((region, index) => {
+    regions.forEach((region) => {
       // Get color based on severity
       const color = getSeverityColor(region.severity);
 
@@ -128,7 +128,7 @@ const DiseaseVisualizer: React.FC<DiseaseVisualizerProps> = ({ image, result }) 
     ctx.globalAlpha = 1.0;
   };
 
-  const drawLegend = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+  const drawLegend = (ctx: CanvasRenderingContext2D, width: number) => {
     // Draw severity legend in top-right corner
     const legendX = width - 200;
     const legendY = 10;
