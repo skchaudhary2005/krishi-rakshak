@@ -12,4 +12,16 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          animation: ['framer-motion'],
+          icons: ['lucide-react', 'react-icons'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 700,
+  },
 })
