@@ -1890,6 +1890,17 @@ def load_pest_model():
     return True
 
 
+def assess_pest_risk(detections):
+    if not detections:
+        return {"score":0,"level":"low","label":"No pest detected","recommended_actions":["Continue routine field monitoring.","Capture a clear close-up image and rescan if symptoms continue."],"validated":False,"method":"pest_rule_based_v1"}
+    avg=sum(float(d.get("confidence",0)) for d in detections)/len(detections)
+    count=len(detections)
+    score=round(min(100.0,avg*0.75+min(count,10)*4),2)
+    level="high" if score>=70 else "medium" if score>=40 else "low"
+    actions=["Inspect nearby plants for the same pest.","Repeat the scan across several representative plants.","Confirm the pest identification before treatment."]
+    if level=="high": actions.append("Follow local agricultural guidance and registered product labels before applying treatment.")
+    return {"score":score,"level":level,"label":level.title()+" pest risk","recommended_actions":actions,"validated":False,"method":"pest_rule_based_v1"}
+
 def detect_pests(image_file, confidence_threshold=0.25):
     global _pest_model
     if not YOLO_AVAILABLE:
