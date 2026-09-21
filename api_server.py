@@ -1856,6 +1856,86 @@ def consultants():
     }), 200
 
 
+
+# ============================================================
+# UNIFIED CROP HEALTH ASSESSMENT
+# ============================================================
+
+@app.route("/api/unified-assessment", methods=["POST"])
+def unified_assessment():
+    """Combine disease context, YOLO pest detection, and weather into one explainable result."""
+    try:
+        image = request.files.get("image")
+        if image is None:
+            return jsonify({"success": False, "error": "image file is required"}), 400
+
+        disease = str(request.form.get("disease") or "unknown disease")
+        try:
+            disease_confidence = float(request.form.get("disease_confidence", "0"))
+        except ValueError:
+            disease_confidence = 0.0
+
+        try:
+            weather = json.loads(request.form.get("weather") or "{}")
+            if not isinstance(weather, dict):
+                weather = {}
+        except Exception:
+            weather = {}
+
+        severity = calculate_severity(disease, disease_confidence * 100 if disease_confidence <= 1 else disease_confidence)
+        disease_conf_pct = disease_confidence * 100 if disease_confidence <= 1 else disease_confidence
+        disease_risk = calculate_risk_assessment(disease, disease_conf_pct, severity, weather)
+
+        pest_result = detect_pests(image, 0.25)
+        pest_risk = pest_result.get("risk_assessment") or assess_pest_risk(pest_result.get("detections", []))
+
+        scores = [float(disease_risk.get("score", 0)), float(pest_risk.get("score", 0))]
+        overall_score = round(max(scores), 2)
+        overall_level = "high" if overall_score >= 70 else "medium" if overall_score >= 40 else "low"
+
+        actions = []
+        if disease_risk.get("score", 0) > 0:
+            actions.append("Inspect the affected crop area and nearby plants.")
+        if pest_result.get("detections"):
+            actions.extend(pest_risk.get("recommended_actions", [])[:2])
+        if weather.get("humidity") is not None and float(weather.get("humidity") or 0) >= 80:
+            actions.append("Monitor closely for disease-favorable high humidity.")
+        if weather.get("rainfall") is not None and float(weather.get("rainfall") or 0) > 10:
+            actions.append("Check drainage after rainfall and avoid unnecessary spraying during wet conditions.")
+        if not actions:
+            actions.append("Continue routine crop monitoring and rescan if symptoms change.")
+        actions = list(dict.fromkeys(actions))
+
+        return jsonify({
+            "success": True,
+            "disease": {
+                "name": disease,
+                "confidence": round(disease_conf_pct, 2),
+                "severity": severity,
+                "risk_assessment": disease_risk
+            },
+            "pest": {
+                "detections": pest_result.get("detections", []),
+                "count": pest_result.get("count", 0),
+                "summary": pest_result.get("pest_summary", {}),
+                "risk_assessment": pest_risk
+            },
+            "weather": weather,
+            "overall_assessment": {
+                "score": overall_score,
+                "level": overall_level,
+                "label": overall_level.title() + " overall crop health risk",
+                "recommended_actions": actions,
+                "method": "unified_rule_based_v1",
+                "validated": False
+            },
+            "disclaimer": "Unified risk is an explainable rule-based prototype using model outputs and supplied weather signals; it is not a validated agronomic forecast."
+        }), 200
+    except Exception as e:
+        print(f"[UNIFIED ASSESSMENT ERROR] {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ============================================================
 # PEST DETECTION (YOLO)
 # ============================================================
