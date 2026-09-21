@@ -848,7 +848,7 @@ const Dashboard = () => {
               <div className="rounded-xl bg-gray-50 p-4 text-center">
 
                 <p className="text-2xl font-bold text-gray-900">
-                  38
+                  192
                 </p>
 
                 <p className="text-xs text-gray-500">
