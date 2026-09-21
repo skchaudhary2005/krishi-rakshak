@@ -2153,6 +2153,7 @@ if __name__ == "__main__":
     print("  POST /api/predict")
     print("  POST /api/pest-detect")
     print("  GET  /api/pest-detect/status")
+    print("  POST /api/unified-assessment")
     print("  POST /api/risk-assessment")
     print("  GET  /api/hotspots")
     print("  GET  /api/hotspots/summary")
