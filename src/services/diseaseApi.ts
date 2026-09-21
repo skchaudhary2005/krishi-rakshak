@@ -114,7 +114,7 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
       await realModelService.loadModel();
     }
 
-    // Step 2: Real ML Detection (72% accuracy)
+    // Step 2: Run the deployed disease model
     console.log('🔬 Running REAL ML disease detection...');
     const mlResult = await realModelService.predict(image);
     
@@ -170,7 +170,7 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
           disease: `${mlResult.crop} - ${mlResult.disease}`,
           confidence: mlResult.confidence,
           treatment: [
-            "🌾 Based on trained AI detection with 72% accuracy",
+            "🌾 Use the model prediction as decision-support evidence and confirm uncertain cases with an agricultural expert.",
             "Remove affected plant parts if disease is spreading",
             "Apply appropriate organic or chemical treatment for " + mlResult.disease,
             "Monitor plant health daily",
