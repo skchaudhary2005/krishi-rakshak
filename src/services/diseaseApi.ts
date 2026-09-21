@@ -145,7 +145,11 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
     
     // Combine both results
     return {
-      ...geminiResult,
+      disease: mlResult.disease,
+      confidence: mlResult.confidence,
+      treatment: geminiResult.treatment,
+      prevention: geminiResult.prevention,
+      aiInsights: geminiResult.aiInsights,
       mlPrediction: {
         disease: mlResult.disease,
         confidence: mlResult.confidence,
@@ -197,14 +201,20 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
       console.error('REAL ML detection also failed:', mlError);
     }
     
-    // Final fallback to mock data
-    console.log('⚠️ Both REAL ML and AI failed, using fallback data...');
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    const randomIndex = Math.floor(Math.random() * mockDiseases.length);
+    // Never fabricate a disease when the real model is unavailable.
     const processingTime = Date.now() - startTime;
-    
     return {
-      ...mockDiseases[randomIndex],
+      disease: 'Analysis unavailable',
+      confidence: 0,
+      treatment: [
+        'The crop disease model is currently unavailable.',
+        'Start the Flask backend and retry the scan.',
+        'For an important crop decision, confirm the diagnosis with a qualified agricultural expert.'
+      ],
+      prevention: [
+        'Do not apply disease-specific treatment from an unverified result.',
+        'Capture a clear, well-lit image and rescan.'
+      ],
       detectionMethod: 'Fallback',
       processingTime
     };
