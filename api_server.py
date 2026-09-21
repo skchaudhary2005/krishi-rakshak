@@ -1,3 +1,5 @@
+import cv2
+import numpy as np
 import os
 import json
 import uuid
@@ -1889,53 +1891,32 @@ def load_pest_model():
 
 
 def detect_pests(image_file, confidence_threshold=0.25):
-    if not YOLO_AVAILABLE:
-        raise RuntimeError(
-            "Ultralytics is not installed. Install it with: pip install ultralytics"
-        )
-
     global _pest_model
+    if not YOLO_AVAILABLE:
+        raise RuntimeError("Ultralytics is not installed")
+    if not os.path.exists(PEST_MODEL_PATH):
+        raise FileNotFoundError(f"Pest model not found: {PEST_MODEL_PATH}")
     if _pest_model is None:
-        if not load_pest_model():
-            raise FileNotFoundError(
-                f"Pest YOLO weights not found: {PEST_MODEL_PATH}. "
-                "Place a trained best.pt file there or set PEST_MODEL_PATH."
-            )
-
-    image_file.stream.seek(0)
-    results = _pest_model.predict(
-        source=image_file.stream,
-        conf=float(confidence_threshold),
-        verbose=False
-    )
-
-    detections = []
-    if results:
-        result = results[0]
-        names = result.names or {}
-
-        if result.boxes is not None:
-            for box in result.boxes:
-                cls_id = int(box.cls[0].item())
-                conf = float(box.conf[0].item())
-                xyxy = [round(float(v), 2) for v in box.xyxy[0].tolist()]
-                detections.append({
-                    "class_id": cls_id,
-                    "class_name": str(names.get(cls_id, cls_id)),
-                    "confidence": round(conf * 100, 2),
-                    "bbox": xyxy
-                })
-
-    detections.sort(key=lambda x: x["confidence"], reverse=True)
-
-    return {
-        "detected": len(detections) > 0,
-        "count": len(detections),
-        "detections": detections,
-        "model": os.path.basename(PEST_MODEL_PATH),
-        "model_type": "YOLO"
-    }
-
+        _pest_model = YOLO(PEST_MODEL_PATH)
+    image_bytes = image_file.read()
+    if not image_bytes:
+        raise ValueError("Uploaded image is empty")
+    image_array = np.frombuffer(image_bytes, dtype=np.uint8)
+    image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("Could not decode uploaded image")
+    results = _pest_model.predict(source=image, conf=confidence_threshold, verbose=False)
+    detections=[]
+    for result in results:
+        if result.boxes is None:
+            continue
+        for box in result.boxes:
+            class_id=int(box.cls[0].item())
+            confidence=float(box.conf[0].item())
+            xyxy=box.xyxy[0].tolist()
+            detections.append({'class_id':class_id,'class_name':result.names.get(class_id,str(class_id)),'confidence':round(confidence*100,2),'bbox':[round(float(v),2) for v in xyxy]})
+    detections.sort(key=lambda x:x['confidence'], reverse=True)
+    return {'success':True,'detections':detections,'count':len(detections),'model':PEST_MODEL_PATH,'model_type':'YOLO'}
 
 @app.route("/api/pest-detect", methods=["POST"])
 def pest_detect():
