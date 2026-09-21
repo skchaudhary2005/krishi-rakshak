@@ -386,8 +386,7 @@ const About = () => {
         {/* STATS */}
         <section className="mb-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ['95.14%', 'Validation Accuracy'],
-            ['38', 'Disease Classes'],
+            ['192', 'Disease Classes'],
             ['224×224', 'Image Input'],
             ['AI', 'Smart Analysis'],
           ].map(([value, label], index) => (
