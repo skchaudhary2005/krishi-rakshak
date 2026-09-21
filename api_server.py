@@ -1927,7 +1927,7 @@ def detect_pests(image_file, confidence_threshold=0.25):
             xyxy=box.xyxy[0].tolist()
             detections.append({'class_id':class_id,'class_name':result.names.get(class_id,str(class_id)),'confidence':round(confidence*100,2),'bbox':[round(float(v),2) for v in xyxy]})
     detections.sort(key=lambda x:x['confidence'], reverse=True)
-    return {'success':True,'detections':detections,'count':len(detections),'model':PEST_MODEL_PATH,'model_type':'YOLO'}
+    return {'success':True,'detections':detections,'count':len(detections),'pest_summary':{n:sum(1 for d in detections if d['class_name']==n) for n in set(d['class_name'] for d in detections)},'risk_assessment':assess_pest_risk(detections),'model':PEST_MODEL_PATH,'model_type':'YOLO'}
 
 @app.route("/api/pest-detect", methods=["POST"])
 def pest_detect():
