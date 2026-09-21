@@ -294,7 +294,7 @@ const About = () => {
               <div className="mt-7 flex flex-wrap gap-3">
                 <div className="flex items-center gap-2 rounded-full bg-green-50 px-4 py-2 text-sm font-semibold text-green-700">
                   <CheckCircle size={18} />
-                  95.14% Validation Accuracy
+                  192-Class Disease Model
                 </div>
 
                 <div className="flex items-center gap-2 rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
