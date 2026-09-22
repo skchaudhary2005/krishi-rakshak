@@ -41,8 +41,32 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
     console.log(`   Confidence: ${(mlResult.confidence * 100).toFixed(1)}%`);
     console.log(`   Crop: ${mlResult.crop}`);
 
-    // Step 3: Get treatment/prevention/insights from the secure backend.
+    // Step 3: Ask Gemini Vision to independently inspect the same image.
     // Gemini credentials stay server-side on Render; never expose them in Vercel.
+    let visionAnalysis: any = null;
+    try {
+      const visionForm = new FormData();
+      visionForm.append('image', image);
+      visionForm.append('ml_disease', mlResult.disease);
+      visionForm.append('ml_crop', mlResult.crop);
+      visionForm.append('ml_confidence', String(Number((mlResult.confidence * 100).toFixed(2))));
+      visionForm.append('language', 'en');
+      const visionResponse = await fetch(apiBase + '/api/ai-vision', {
+        method: 'POST',
+        body: visionForm
+      });
+      if (visionResponse.ok) {
+        const visionData = await visionResponse.json();
+        if (visionData?.success && visionData?.vision) {
+          visionAnalysis = visionData.vision;
+          console.log('👁️ GEMINI VISION:', visionAnalysis);
+        }
+      }
+    } catch (visionError) {
+      console.warn('⚠️ Gemini Vision unavailable:', visionError);
+    }
+
+    // Step 4: Get treatment/prevention/insights from the secure backend.
     console.log('🤖 Requesting secure AI crop advice...');
     const apiBase =
       import.meta.env.VITE_API_BASE_URL ||
@@ -96,14 +120,19 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
       confidence: mlResult.confidence,
       treatment: advice.treatment,
       prevention: advice.prevention,
-      aiInsights: advice.aiInsights,
+      aiInsights: [
+        advice.aiInsights,
+        visionAnalysis
+          ? `Gemini Vision: ${visionAnalysis.disease} (${Number(visionAnalysis.confidence).toFixed(1)}%). ${visionAnalysis.observations} Agreement with ML: ${visionAnalysis.agreement}.`
+          : ''
+      ].filter(Boolean).join(' '),
       mlPrediction: {
         disease: mlResult.disease,
         confidence: mlResult.confidence,
         crop: mlResult.crop,
         topPredictions: mlResult.topPredictions
       },
-      detectionMethod: aiSource === 'gemini_ai_advice' ? 'REAL-ML+AI' : 'REAL-ML-Only',
+      detectionMethod: (aiSource === 'gemini_ai_advice' || visionAnalysis) ? 'REAL-ML+AI' : 'REAL-ML-Only',
       processingTime
     };
   } catch (error) {
