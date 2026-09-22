@@ -57,7 +57,7 @@ INPUT_SIZE = 224
 # PowerShell: $env:GEMINI_API_KEY = "YOUR_KEY"
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.7-flash")
-GEMINI_FALLBACK_MODELS = [GEMINI_MODEL, "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+GEMINI_FALLBACK_MODELS = [GEMINI_MODEL, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
 GEMINI_TIMEOUT_SECONDS = 20
 
 
@@ -1603,13 +1603,22 @@ Return JSON only with exactly: description, treatment, prevention, farmer_action
             if not candidates: raise RuntimeError(f"Gemini {model} returned no candidates")
             parts=candidates[0].get('content',{}).get('parts',[])
             txt=''.join(str(x.get('text') or '') for x in parts if isinstance(x,dict)).strip()
-            obj=json.loads(txt)
+            try:
+                obj=json.loads(txt)
+            except json.JSONDecodeError:
+                start=txt.find("{")
+                end=txt.rfind("}")
+                if start >= 0 and end > start:
+                    obj=json.loads(txt[start:end+1])
+                else:
+                    raise RuntimeError("Gemini returned non-JSON advice")
             keys=['description','treatment','prevention','farmer_action']
-            if not all(isinstance(obj.get(k),str) and obj[k].strip() for k in keys): raise RuntimeError('Invalid Gemini advice JSON')
+            if not all(isinstance(obj.get(k),str) and obj[k].strip() for k in keys):
+                raise RuntimeError("Invalid Gemini advice JSON")
             print(f"[GEMINI ADVICE] SUCCESS: {model}")
             return {k:obj[k].strip() for k in keys}
         except Exception as e:
-            last=e; print(f"[GEMINI ADVICE] {model} -> {e}")
+            last=e; print(f"[GEMINI ADVICE] {model} -> {type(e).__name__}: {e}")
     raise last or RuntimeError("All Gemini models failed for advice")
 
 
