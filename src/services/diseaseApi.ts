@@ -52,7 +52,7 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
     let advice = {
       treatment: ['Confirm the diagnosis before applying disease-specific treatment.'],
       prevention: ['Monitor the crop regularly and remove severely affected material when appropriate.'],
-      aiInsights: 'AI treatment guidance is temporarily unavailable.'
+      aiInsights: 'Local agricultural guidance is available because live Gemini advice is temporarily unavailable.'
     };
     let aiSource = 'local_ai_advice';
 
@@ -74,7 +74,13 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
         advice = {
           treatment: a.treatment ? [a.treatment] : advice.treatment,
           prevention: a.prevention ? [a.prevention] : advice.prevention,
-          aiInsights: [a.description, a.farmer_action].filter(Boolean).join(' ')
+          aiInsights: [
+            a.description || a.summary,
+            a.farmer_action,
+            adviceData.source === 'local_ai_advice'
+              ? 'Live Gemini advice is temporarily unavailable; this is the built-in agricultural fallback.'
+              : ''
+          ].filter(Boolean).join(' ') || advice.aiInsights
         };
         aiSource = adviceData.source || 'local_ai_advice';
       }
