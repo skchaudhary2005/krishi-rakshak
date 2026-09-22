@@ -1848,7 +1848,7 @@ def ai_advice():
         else:
             try:
                 advice=_gemini_advice_details(disease,crop,confidence,language)
-            source="gemini_ai_advice"
+                source="gemini_ai_advice"
             except Exception as e:
                 print(f"[GEMINI ADVICE FALLBACK] {e}")
                 advice=_kr_disease_advice(disease,crop,language)
