@@ -2014,10 +2014,15 @@ def unified_assessment():
 # Optional custom Ultralytics model. Put trained weights at:
 # public/models/pest/best.pt
 # Or set PEST_MODEL_PATH to another .pt path.
+# YOLO is disabled by default on Render Free because the instance has 512 MB RAM.
+# Enable explicitly with PEST_DETECTION_ENABLED=true on a service with enough memory.
+_default_pest_enabled = "false" if os.environ.get("RENDER_SERVICE_NAME") else "true"
+PEST_DETECTION_ENABLED = os.environ.get("PEST_DETECTION_ENABLED", _default_pest_enabled).lower() in {"1", "true", "yes", "on"}
+
 YOLO = None
 try:
     import importlib.util
-    YOLO_AVAILABLE = importlib.util.find_spec("ultralytics") is not None
+    YOLO_AVAILABLE = PEST_DETECTION_ENABLED and importlib.util.find_spec("ultralytics") is not None
 except Exception:
     YOLO_AVAILABLE = False
 
@@ -2045,6 +2050,10 @@ _pest_model = None
 def load_pest_model():
     global _pest_model
 
+    if not PEST_DETECTION_ENABLED:
+        print("[PEST] Disabled for this deployment (set PEST_DETECTION_ENABLED=true to enable).")
+        return False
+
     if not _ensure_yolo():
         return False
 
@@ -2069,6 +2078,17 @@ def assess_pest_risk(detections):
 
 def detect_pests(image_file, confidence_threshold=0.25):
     global _pest_model
+    if not PEST_DETECTION_ENABLED:
+        return {
+            "success": True,
+            "detections": [],
+            "count": 0,
+            "pest_summary": {},
+            "risk_assessment": assess_pest_risk([]),
+            "model": None,
+            "model_type": "YOLO (disabled on low-memory deployment)",
+            "disabled": True,
+        }
     if not _ensure_yolo():
         raise RuntimeError("Ultralytics is not installed")
     if not os.path.exists(PEST_MODEL_PATH):
@@ -2144,10 +2164,11 @@ def pest_detect():
 @app.route("/api/pest-detect/status", methods=["GET"])
 def pest_detect_status():
     configured = bool(
-        YOLO_AVAILABLE and os.path.exists(PEST_MODEL_PATH)
+        PEST_DETECTION_ENABLED and YOLO_AVAILABLE and os.path.exists(PEST_MODEL_PATH)
     )
     return jsonify({
         "success": True,
+        "enabled": PEST_DETECTION_ENABLED,
         "configured": configured,
         "yolo_installed": YOLO_AVAILABLE,
         "model_path": PEST_MODEL_PATH,
