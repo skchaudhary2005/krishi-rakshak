@@ -181,6 +181,9 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
             vision_agreement: visionAnalysis?.agreement || 'unknown',
             language: 'en'
           })
+        }).then(async (response) => {
+          if (!response.ok) return response;
+          return response;
         });
 
         const adviceData = await adviceResponse.json();
