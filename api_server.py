@@ -66,6 +66,58 @@ GEMINI_FALLBACK_MODELS = list(dict.fromkeys([
 ]))
 GEMINI_TIMEOUT_SECONDS = 8
 
+# ============================================================
+# DIAGNOSIS SAFETY GATE
+# ============================================================
+# Conservative defaults: a model top-1 class is NOT treated as a
+# confirmed diagnosis. Disease-specific treatment is allowed only
+# after strong ML evidence AND independent visual agreement.
+ML_REVIEW_THRESHOLD = 60.0
+ML_CONFIRM_THRESHOLD = 80.0
+ML_MIN_MARGIN = 10.0
+VISION_CONFIRM_THRESHOLD = 70.0
+
+def diagnosis_safety_gate(confidence, top_predictions, vision=None):
+    try:
+        confidence = float(confidence or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    preds = top_predictions or []
+    try:
+        second = float(preds[1].get("confidence", 0.0)) if len(preds) > 1 else 0.0
+    except (TypeError, ValueError, AttributeError):
+        second = 0.0
+
+    margin = max(0.0, confidence - second)
+
+    if confidence < ML_REVIEW_THRESHOLD or margin < 5.0:
+        status = "uncertain"
+        message = "Insufficient model evidence; diagnosis withheld."
+    elif vision and vision.get("agreement") in {"disagree", "uncertain"}:
+        status = "review"
+        message = "Independent visual analysis does not sufficiently agree with the ML result."
+    elif (
+        confidence >= ML_CONFIRM_THRESHOLD
+        and margin >= ML_MIN_MARGIN
+        and vision
+        and vision.get("agreement") == "agree"
+        and float(vision.get("confidence", 0.0)) >= VISION_CONFIRM_THRESHOLD
+    ):
+        status = "confirmed"
+        message = "Strong ML evidence and independent visual agreement obtained."
+    else:
+        status = "review"
+        message = "Diagnosis requires visual or expert confirmation before disease-specific treatment."
+
+    return {
+        "status": status,
+        "actionable": status == "confirmed",
+        "margin": round(margin, 2),
+        "message": message
+    }
+
+
 
 
 # ============================================================
@@ -808,6 +860,10 @@ def predict():
         )
 
         prediction["severity"] = severity
+        safety = diagnosis_safety_gate(
+            prediction["confidence"],
+            prediction.get("top_predictions", [])
+        )
 
         # Optional weather context supplied by the frontend.
         weather = get_optional_weather(request.form)
@@ -831,10 +887,10 @@ def predict():
             prediction["class_name"]
         ):
             status = "healthy"
-
-        elif prediction["confidence"] >= 50:
+        elif safety["status"] == "confirmed":
             status = "disease_detected"
-
+        elif safety["status"] == "review":
+            status = "requires_confirmation"
         else:
             status = "low_confidence"
 
@@ -870,7 +926,11 @@ def predict():
                 "class_name": prediction["class_name"],
                 "confidence": prediction["confidence"],
                 "status": status,
-                "severity": severity
+                "severity": severity,
+                "diagnosis_status": safety["status"],
+                "diagnosis_actionable": safety["actionable"],
+                "confidence_margin": safety["margin"],
+                "diagnosis_message": safety["message"]
             },
 
             "risk_assessment": risk_assessment,
@@ -1767,17 +1827,36 @@ def ai_advice():
         crop=data.get("crop") or "crop"
         language=str(data.get("language") or "en").lower()
         confidence=data.get("confidence")
+        diagnosis_status=str(data.get("diagnosis_status") or "").lower()
+        vision_agreement=str(data.get("vision_agreement") or "").lower()
         if language not in {"en","hi","pa","mr","bn","gu","ta","te","kn","ml"}: language="en"
+
         try:
-            advice=_gemini_advice_details(disease,crop,confidence,language)
+            confidence_value = float(confidence or 0)
+        except (TypeError, ValueError):
+            confidence_value = 0.0
+
+        if diagnosis_status != "confirmed":
+            advice = {
+                "description": "The diagnosis is not confirmed strongly enough for disease-specific treatment.",
+                "summary": "The diagnosis is not confirmed strongly enough for disease-specific treatment.",
+                "treatment": "Do not apply disease-specific fungicide, pesticide, or other chemical treatment from this scan alone. Confirm the diagnosis with a clear leaf-level image and qualified local agricultural guidance.",
+                "prevention": "Inspect several plants, use a clear close-up leaf image for rescanning, and avoid unnecessary chemical treatment until the diagnosis is confirmed.",
+                "farmer_action": "Collect clear photos of affected leaves and consult a KVK or qualified agriculture professional before taking disease-specific action."
+            }
+            source = "safety_gate"
+        else:
+            try:
+                advice=_gemini_advice_details(disease,crop,confidence,language)
             source="gemini_ai_advice"
-        except Exception as e:
-            print(f"[GEMINI ADVICE FALLBACK] {e}")
-            advice=_kr_disease_advice(disease,crop,language)
-            if "description" not in advice and "summary" in advice:
-                advice["description"]=advice["summary"]
-            source="local_ai_advice"
-        return jsonify({"success":True,"source":source,"language":language,"language_name":_kr_language_name(language),"crop":crop,"disease":disease,"confidence":confidence,"advice":advice,"disclaimer":"AI guidance is informational. Confirm diagnosis and treatment with a qualified local agriculture professional or official agricultural guidance before applying any crop-protection product."}),200
+            except Exception as e:
+                print(f"[GEMINI ADVICE FALLBACK] {e}")
+                advice=_kr_disease_advice(disease,crop,language)
+                if "description" not in advice and "summary" in advice:
+                    advice["description"]=advice["summary"]
+                source="local_ai_advice"
+
+        return jsonify({"success":True,"source":source,"language":language,"language_name":_kr_language_name(language),"crop":crop,"disease":disease,"confidence":confidence,"diagnosis_status":diagnosis_status or "unverified","vision_agreement":vision_agreement or "unknown","advice":advice,"disclaimer":"AI guidance is informational. Confirm diagnosis and treatment with a qualified local agriculture professional or official agricultural guidance before applying any crop-protection product."}),200
     except Exception as e:
         print(f"[AI ADVICE ERROR] {e}")
         return jsonify({"success":False,"error":str(e)}),500
@@ -2032,9 +2111,22 @@ def unified_assessment():
         except Exception:
             weather = {}
 
-        severity = calculate_severity(disease, disease_confidence * 100 if disease_confidence <= 1 else disease_confidence)
         disease_conf_pct = disease_confidence * 100 if disease_confidence <= 1 else disease_confidence
-        disease_risk = calculate_risk_assessment(disease, disease_conf_pct, severity, weather)
+        raw_safety = diagnosis_safety_gate(disease_conf_pct, [{"confidence": disease_conf_pct}, {"confidence": 0.0}])
+        disease_confirmed = raw_safety["status"] == "confirmed"
+
+        if disease_confirmed:
+            severity = calculate_severity(disease, disease_conf_pct)
+            disease_risk = calculate_risk_assessment(disease, disease_conf_pct, severity, weather)
+        else:
+            severity = "none"
+            disease_risk = {
+                "score": 0.0,
+                "level": "unavailable",
+                "factors": [],
+                "method": "safety_gate",
+                "validated": False
+            }
 
         pest_result = detect_pests(image, 0.25)
         pest_risk = pest_result.get("risk_assessment") or assess_pest_risk(pest_result.get("detections", []))
@@ -2113,9 +2205,12 @@ def unified_assessment():
         return jsonify({
             "success": True,
             "disease": {
-                "name": disease,
+                "name": disease if disease_confirmed else "diagnosis withheld",
+                "candidate": disease,
                 "confidence": round(disease_conf_pct, 2),
                 "severity": severity,
+                "diagnosis_status": raw_safety["status"],
+                "diagnosis_actionable": disease_confirmed,
                 "risk_assessment": disease_risk
             },
             "pest": {
