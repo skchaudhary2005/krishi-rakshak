@@ -3,5 +3,5 @@ services:
     name: krishi-rakshak-api
     runtime: python
     buildCommand: pip install -r requirements-production.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 api_server:app
+    startCommand: python render_start.py
     healthCheckPath: /api/health
