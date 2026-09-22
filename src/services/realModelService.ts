@@ -52,8 +52,9 @@ class RealModelService {
    * VITE_API_URL=http://localhost:5000
    */
   private apiUrl =
+    import.meta.env.VITE_API_BASE_URL ||
     import.meta.env.VITE_API_URL ||
-    'http://localhost:5000';
+    'http://127.0.0.1:5000';
 
   private modelReady = false;
 
@@ -65,7 +66,8 @@ class RealModelService {
   /**
    * Request timeout.
    */
-  private readonly REQUEST_TIMEOUT = 5000;
+  // Render free services can cold-start; allow enough time for wake-up + inference.
+  private readonly REQUEST_TIMEOUT = 120000;
 
   /**
    * Create AbortSignal with timeout.
