@@ -1,4 +1,3 @@
-import { analyzeCropImage } from './geminiService';
 import { realModelService } from './realModelService';
 
 export interface DiseaseResult {
@@ -42,40 +41,63 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
     console.log(`   Confidence: ${(mlResult.confidence * 100).toFixed(1)}%`);
     console.log(`   Crop: ${mlResult.crop}`);
 
-    // Convert image to base64 for Gemini
-    const reader = new FileReader();
-    const base64Promise = new Promise<string>((resolve) => {
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.readAsDataURL(image);
-    });
-    
-    const imageBase64 = await base64Promise;
-    
-    // Step 3: Detailed Gemini AI Analysis (Medicine & Treatment)
-    console.log('🤖 Running Gemini AI analysis for detailed recommendations...');
-    const geminiResult = await analyzeCropImage(imageBase64, {
-      disease: mlResult.disease,
-      confidence: mlResult.confidence,
-      crop: mlResult.crop,
-      isHealthy: mlResult.isHealthy
-    });
-    
+    // Step 3: Get treatment/prevention/insights from the secure backend.
+    // Gemini credentials stay server-side on Render; never expose them in Vercel.
+    console.log('🤖 Requesting secure AI crop advice...');
+    const apiBase =
+      import.meta.env.VITE_API_BASE_URL ||
+      import.meta.env.VITE_API_URL ||
+      'http://127.0.0.1:5000';
+
+    let advice = {
+      treatment: ['Confirm the diagnosis before applying disease-specific treatment.'],
+      prevention: ['Monitor the crop regularly and remove severely affected material when appropriate.'],
+      aiInsights: 'AI treatment guidance is temporarily unavailable.'
+    };
+    let aiSource = 'local_ai_advice';
+
+    try {
+      const adviceResponse = await fetch(apiBase + '/api/advice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          disease: mlResult.disease,
+          crop: mlResult.crop,
+          confidence: Number((mlResult.confidence * 100).toFixed(2)),
+          language: 'en'
+        })
+      });
+
+      const adviceData = await adviceResponse.json();
+      if (adviceResponse.ok && adviceData?.success && adviceData?.advice) {
+        const a = adviceData.advice;
+        advice = {
+          treatment: a.treatment ? [a.treatment] : advice.treatment,
+          prevention: a.prevention ? [a.prevention] : advice.prevention,
+          aiInsights: [a.description, a.farmer_action].filter(Boolean).join(' ')
+        };
+        aiSource = adviceData.source || 'local_ai_advice';
+      }
+    } catch (adviceError) {
+      console.warn('⚠️ Secure AI advice unavailable:', adviceError);
+    }
+
     const processingTime = Date.now() - startTime;
     
     // Combine both results
     return {
       disease: mlResult.disease,
       confidence: mlResult.confidence,
-      treatment: geminiResult.treatment,
-      prevention: geminiResult.prevention,
-      aiInsights: geminiResult.aiInsights,
+      treatment: advice.treatment,
+      prevention: advice.prevention,
+      aiInsights: advice.aiInsights,
       mlPrediction: {
         disease: mlResult.disease,
         confidence: mlResult.confidence,
         crop: mlResult.crop,
         topPredictions: mlResult.topPredictions
       },
-      detectionMethod: 'REAL-ML+AI',
+      detectionMethod: aiSource === 'gemini_ai_advice' ? 'REAL-ML+AI' : 'REAL-ML-Only',
       processingTime
     };
   } catch (error) {
