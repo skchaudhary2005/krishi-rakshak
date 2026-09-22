@@ -41,6 +41,11 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
     console.log(`   Confidence: ${(mlResult.confidence * 100).toFixed(1)}%`);
     console.log(`   Crop: ${mlResult.crop}`);
 
+    const apiBase =
+      import.meta.env.VITE_API_BASE_URL ||
+      import.meta.env.VITE_API_URL ||
+      'https://krishi-rakshak-api.onrender.com';
+
     // Step 3: Ask Gemini Vision to independently inspect the same image.
     // Gemini credentials stay server-side on Render; never expose them in Vercel.
     let visionAnalysis: any = null;
@@ -68,11 +73,6 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
 
     // Step 4: Get treatment/prevention/insights from the secure backend.
     console.log('🤖 Requesting secure AI crop advice...');
-    const apiBase =
-      import.meta.env.VITE_API_BASE_URL ||
-      import.meta.env.VITE_API_URL ||
-      'https://krishi-rakshak-api.onrender.com';
-
     let advice = {
       treatment: ['Confirm the diagnosis before applying disease-specific treatment.'],
       prevention: ['Monitor the crop regularly and remove severely affected material when appropriate.'],
