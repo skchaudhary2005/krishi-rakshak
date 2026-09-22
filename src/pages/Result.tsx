@@ -45,6 +45,7 @@ const Result = () => {
         form.append('image', new File([blob], 'crop.jpg', { type: blob.type || 'image/jpeg' }));
         form.append('disease', result.mlPrediction?.disease || result.disease);
         form.append('disease_confidence', String(result.mlPrediction?.confidence ?? result.confidence));
+        form.append('diagnosis_status', result.diagnosisStatus || 'uncertain');
 
         let weather: Record<string, number | string> = {};
         try {
