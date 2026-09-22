@@ -13,10 +13,7 @@ from PIL import Image
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-try:
-    import tensorflow as tf
-except Exception as e:
-    raise RuntimeError(f"TensorFlow import failed: {e}")
+tf = None
 
 
 # ============================================================
@@ -199,6 +196,14 @@ def load_model():
     global interpreter
     global input_details
     global output_details
+    global tf
+
+    if tf is None:
+        try:
+            import tensorflow as _tf
+            tf = _tf
+        except Exception as e:
+            raise RuntimeError(f"TensorFlow import failed: {e}")
 
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(
@@ -2009,12 +2014,26 @@ def unified_assessment():
 # Optional custom Ultralytics model. Put trained weights at:
 # public/models/pest/best.pt
 # Or set PEST_MODEL_PATH to another .pt path.
+YOLO = None
 try:
-    from ultralytics import YOLO
-    YOLO_AVAILABLE = True
+    import importlib.util
+    YOLO_AVAILABLE = importlib.util.find_spec("ultralytics") is not None
 except Exception:
-    YOLO = None
     YOLO_AVAILABLE = False
+
+def _ensure_yolo():
+    global YOLO, YOLO_AVAILABLE
+    if YOLO is not None:
+        return True
+    try:
+        from ultralytics import YOLO as _YOLO
+        YOLO = _YOLO
+        YOLO_AVAILABLE = True
+        return True
+    except Exception as e:
+        YOLO_AVAILABLE = False
+        print(f"[PEST] Ultralytics import failed: {e}")
+        return False
 
 PEST_MODEL_PATH = os.environ.get(
     "PEST_MODEL_PATH",
@@ -2026,7 +2045,7 @@ _pest_model = None
 def load_pest_model():
     global _pest_model
 
-    if not YOLO_AVAILABLE:
+    if not _ensure_yolo():
         return False
 
     if not os.path.exists(PEST_MODEL_PATH):
@@ -2050,7 +2069,7 @@ def assess_pest_risk(detections):
 
 def detect_pests(image_file, confidence_threshold=0.25):
     global _pest_model
-    if not YOLO_AVAILABLE:
+    if not _ensure_yolo():
         raise RuntimeError("Ultralytics is not installed")
     if not os.path.exists(PEST_MODEL_PATH):
         raise FileNotFoundError(f"Pest model not found: {PEST_MODEL_PATH}")
@@ -2176,9 +2195,13 @@ def initialize_application():
     print("=" * 65)
 
 
-# Gunicorn imports api_server:app. Keep startup lightweight.\n# Load classes/database at startup; load the TFLite model on first prediction.\ntry:\n    load_classes()\n    init_database()\nexcept Exception as e:\n    print(f"KRISHI RAKSHAK startup failed: {e}")\n    raise
-
-    # Do not allow Gunicorn to start a broken application.
+# Gunicorn imports api_server:app. Keep startup lightweight.
+# Load classes/database at startup; load the TFLite model on first prediction.
+try:
+    load_classes()
+    init_database()
+except Exception as e:
+    print(f"KRISHI RAKSHAK startup failed: {e}")
     raise
 
 
