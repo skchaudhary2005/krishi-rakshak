@@ -1482,6 +1482,137 @@ def delete_alert(alert_id):
 
 
 
+
+# ============================================================
+# GEMINI VISION SECONDARY ANALYSIS
+# ============================================================
+
+def _gemini_vision_analysis(image_file, ml_prediction, language="en"):
+    """Run Gemini multimodal analysis as a SECONDARY signal beside the TFLite classifier."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+
+    image_bytes = image_file.read()
+    if not image_bytes:
+        raise ValueError("Uploaded image is empty")
+
+    import base64
+    mime = getattr(image_file, "mimetype", None) or "image/jpeg"
+    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+    language_name = _language_instruction(language)
+
+    prompt = f"""You are the secondary visual-analysis system for Krishi Rakshak.
+The primary classifier is a trained 192-class TFLite model.
+
+Primary ML result:
+- crop: {ml_prediction.get("crop", "unknown")}
+- disease: {ml_prediction.get("disease", "unknown")}
+- confidence: {ml_prediction.get("confidence", 0)}%
+
+Analyze the actual crop image independently. Do NOT blindly agree with the ML result.
+Return ONLY JSON with:
+{{
+  "crop": "best visual crop identification",
+  "disease": "best visual disease identification or unknown",
+  "confidence": 0-100,
+  "observations": "brief visible symptoms",
+  "agreement": "agree|partially_agree|disagree|uncertain",
+  "reason": "brief reason"
+}}
+Reply only in {language_name}.
+If the image is unclear, say uncertain. Never invent symptoms."""
+
+    payload=json.dumps({
+        "contents":[{
+            "role":"user",
+            "parts":[
+                {"text":prompt},
+                {"inline_data":{"mime_type":mime,"data":image_b64}}
+            ]
+        }],
+        "generationConfig":{
+            "maxOutputTokens":500,
+            "thinkingConfig":{"thinkingLevel":"low"},
+            "responseMimeType":"application/json"
+        }
+    }).encode("utf-8")
+
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    last=None
+    for model in GEMINI_FALLBACK_MODELS:
+        if not model:
+            continue
+        req=urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            data=payload,
+            headers={
+                "Content-Type":"application/json",
+                "Accept":"application/json",
+                "x-goog-api-key":GEMINI_API_KEY
+            },
+            method="POST"
+        )
+        try:
+            with opener.open(req,timeout=GEMINI_TIMEOUT_SECONDS) as r:
+                raw=r.read().decode("utf-8","replace")
+            data=json.loads(raw)
+            candidates=data.get("candidates") or []
+            parts=candidates[0].get("content",{}).get("parts",[]) if candidates else []
+            txt="".join(str(x.get("text") or "") for x in parts if isinstance(x,dict)).strip()
+            try:
+                obj=json.loads(txt)
+            except json.JSONDecodeError:
+                start=txt.find("{"); end=txt.rfind("}")
+                if start < 0 or end <= start:
+                    raise RuntimeError("Gemini Vision returned non-JSON")
+                obj=json.loads(txt[start:end+1])
+            required=["crop","disease","confidence","observations","agreement","reason"]
+            if not all(k in obj for k in required):
+                raise RuntimeError("Invalid Gemini Vision JSON")
+            obj["confidence"]=max(0.0,min(100.0,float(obj["confidence"])))
+            obj["source"]="gemini_vision"
+            obj["model"]=model
+            print(f"[GEMINI VISION] SUCCESS: {model}")
+            return obj
+        except Exception as e:
+            last=e
+            print(f"[GEMINI VISION] {model} -> {type(e).__name__}: {e}")
+    raise last or RuntimeError("All Gemini Vision models failed")
+
+
+@app.route("/api/ai-vision", methods=["POST"])
+def ai_vision():
+    try:
+        image=request.files.get("image")
+        if image is None:
+            return jsonify({"success":False,"error":"image file is required"}),400
+        language=str(request.form.get("language") or "en").lower()
+        if language not in {"en","hi","pa","mr","bn","gu","ta","te","kn","ml"}:
+            language="en"
+
+        ml_disease=str(request.form.get("ml_disease") or "unknown")
+        ml_crop=str(request.form.get("ml_crop") or "unknown")
+        try:
+            ml_conf=float(request.form.get("ml_confidence") or 0)
+        except (TypeError,ValueError):
+            ml_conf=0.0
+
+        vision=_gemini_vision_analysis(
+            image,
+            {"disease":ml_disease,"crop":ml_crop,"confidence":ml_conf},
+            language
+        )
+        return jsonify({
+            "success":True,
+            "primary_ml":{"crop":ml_crop,"disease":ml_disease,"confidence":ml_conf},
+            "vision":vision,
+            "disclaimer":"Gemini Vision is a secondary visual-analysis signal, not a validated diagnostic classifier. Confirm important crop decisions with qualified local agricultural guidance."
+        }),200
+    except Exception as e:
+        print(f"[GEMINI VISION ERROR] {e}")
+        return jsonify({"success":False,"error":str(e)}),503
+
+
 # ============================================================
 # AI ADVICE + AI CHAT
 # ============================================================
