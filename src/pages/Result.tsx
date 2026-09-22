@@ -31,7 +31,14 @@ const Result = () => {
 
   useEffect(() => {
     let cancelled = false;
+
     const runUnifiedAssessment = async () => {
+      // Never turn an uncertain disease prediction into a numeric crop-risk score.
+      if (result.diagnosisStatus !== 'confirmed') {
+        setUnified(null);
+        return;
+      }
+
       try {
         const blob = await fetch(image).then((r) => r.blob());
         const form = new FormData();
@@ -52,18 +59,21 @@ const Result = () => {
         } catch {
           // Weather is optional; disease + pest assessment still works.
         }
+
         form.append('weather', JSON.stringify(weather));
 
-        const response = await fetch((import.meta.env.VITE_API_BASE_URL || 'https://krishi-rakshak-api.onrender.com') + '/api/unified-assessment', {
-          method: 'POST',
-          body: form,
-        });
+        const response = await fetch(
+          (import.meta.env.VITE_API_BASE_URL || 'https://krishi-rakshak-api.onrender.com') + '/api/unified-assessment',
+          { method: 'POST', body: form }
+        );
+
         const data = await response.json();
         if (!cancelled && response.ok && data.success) setUnified(data);
       } catch (error) {
         console.error('Unified assessment failed:', error);
       }
     };
+
     runUnifiedAssessment();
     return () => { cancelled = true; };
   }, [image, result]);
@@ -73,12 +83,14 @@ const Result = () => {
     return null;
   }
 
-  const isHealthy = result.disease.toLowerCase().includes('healthy');
+  const isConfirmed = result.diagnosisStatus === 'confirmed';
+  const isHealthy = isConfirmed && result.disease.toLowerCase().includes('healthy');
+  const isUncertain = result.diagnosisStatus !== 'confirmed';
 
   return (
     <div className="min-h-screen">
       <Navbar />
-      
+
       <div className="container mx-auto px-4 py-8 max-w-3xl">
         <button
           onClick={() => navigate('/home')}
@@ -102,30 +114,30 @@ const Result = () => {
           </div>
 
           <div className={`flex items-center gap-3 mb-6 p-4 rounded-xl ${
-            isHealthy ? 'bg-green-50' : 'bg-orange-50'
+            isHealthy ? 'bg-green-50' : isUncertain ? 'bg-yellow-50' : 'bg-orange-50'
           }`}>
             {isHealthy ? (
               <CheckCircle className="text-green-600" size={40} />
             ) : (
-              <AlertCircle className="text-orange-600" size={40} />
+              <AlertCircle className={isUncertain ? "text-yellow-600" : "text-orange-600"} size={40} />
             )}
+
             <div className="flex-1">
               <h2 className="text-2xl font-bold text-gray-800">{result.disease}</h2>
               <p className="text-gray-600">
-                {t('confidence')}: <span className="font-bold">{(result.confidence * 100).toFixed(0)}%</span>
+                ML confidence: <span className="font-bold">{(result.confidence * 100).toFixed(1)}%</span>
               </p>
+
+              {result.diagnosisMessage && (
+                <p className="text-sm text-gray-700 mt-1 font-medium">{result.diagnosisMessage}</p>
+              )}
+
               {result.detectionMethod && (
                 <div className="flex gap-2 mt-2 flex-wrap">
                   {result.detectionMethod.includes('REAL-ML') && (
                     <span className="inline-flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-xs font-semibold rounded-full">
                       <Zap size={12} />
                       ML Model Active
-                    </span>
-                  )}
-                  {result.detectionMethod.includes('ML') && !result.detectionMethod.includes('REAL-ML') && (
-                    <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
-                      <Zap size={12} />
-                      ML Detected
                     </span>
                   )}
                   {result.detectionMethod.includes('AI') && (
@@ -150,6 +162,22 @@ const Result = () => {
             </div>
           </div>
 
+          {isUncertain && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-5 rounded-xl border-2 border-yellow-300 bg-yellow-50"
+            >
+              <h3 className="font-bold text-yellow-900 text-lg">⚠️ Diagnosis not confirmed</h3>
+              <p className="text-sm text-yellow-900 mt-2">
+                The system is intentionally withholding a disease diagnosis because the evidence is not strong enough.
+                <strong> Do not apply disease-specific chemical treatment from this scan.</strong>
+              </p>
+              <p className="text-sm text-yellow-900 mt-2">
+                Upload a clear, close-up photo of the affected leaf (preferably both sides, in good daylight) or consult a KVK/agriculture expert.
+              </p>
+            </motion.div>
+          )}
 
           {unified && (
             <motion.div
@@ -200,7 +228,6 @@ const Result = () => {
             </motion.div>
           )}
 
-          {/* ML Model Detection Results */}
           {result.mlPrediction && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
@@ -209,15 +236,15 @@ const Result = () => {
             >
               <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
                 <Zap className="text-blue-600" size={20} />
-                🤖 ML Model Detection (Quick Scan)
+                🤖 Primary ML Model Result
               </h3>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="bg-white p-3 rounded-lg">
-                  <p className="text-gray-600 font-semibold">Crop Identified</p>
+                  <p className="text-gray-600 font-semibold">Crop Candidate</p>
                   <p className="text-blue-900 font-bold text-lg">{result.mlPrediction.crop}</p>
                 </div>
                 <div className="bg-white p-3 rounded-lg">
-                  <p className="text-gray-600 font-semibold">Disease Detected</p>
+                  <p className="text-gray-600 font-semibold">Top Model Candidate</p>
                   <p className="text-blue-900 font-bold text-lg">{result.mlPrediction.disease}</p>
                 </div>
                 <div className="bg-white p-3 rounded-lg">
@@ -225,22 +252,25 @@ const Result = () => {
                   <p className="text-blue-900 font-bold text-lg">{(result.mlPrediction.confidence * 100).toFixed(1)}%</p>
                 </div>
                 <div className="bg-white p-3 rounded-lg">
-                  <p className="text-gray-600 font-semibold">Health Status</p>
-                  <p className={`font-bold text-lg ${result.mlPrediction.disease.toLowerCase().includes('healthy') ? '✅ Healthy' : '⚠ Diseased'}`}>
-                    {result.mlPrediction.disease.toLowerCase().includes('healthy') ? '✅ Healthy' : '⚠ Diseased'}
+                  <p className="text-gray-600 font-semibold">Safety Status</p>
+                  <p className="font-bold text-lg">
+                    {isConfirmed ? '✅ Confirmed for guidance' : '⚠ Requires confirmation'}
                   </p>
                 </div>
               </div>
             </motion.div>
           )}
 
-          {/* AI Medical Treatment Section */}
           <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 rounded-xl">
             <h3 className="font-bold text-purple-900 flex items-center gap-2">
               <Sparkles className="text-purple-600" size={20} />
-              🏥 AI Crop Analysis & Treatment Plan
+              🏥 AI Crop Safety & Treatment Guidance
             </h3>
-            <p className="text-xs text-purple-700 mt-1">Detailed crop-care recommendations powered by AI</p>
+            <p className="text-xs text-purple-700 mt-1">
+              {isConfirmed
+                ? 'Treatment guidance is shown only after the diagnosis safety gate passes.'
+                : 'Disease-specific treatment is blocked until the diagnosis is confirmed.'}
+            </p>
           </div>
 
           <div className="space-y-6">
@@ -274,7 +304,7 @@ const Result = () => {
                   <motion.li
                     key={index}
                     initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
+                    animate={{ opacity: 0, x: -20 }}
                     transition={{ delay: 0.5 + index * 0.1 }}
                     className="flex items-start gap-2 text-gray-700"
                   >
