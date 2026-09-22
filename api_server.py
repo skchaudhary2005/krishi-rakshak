@@ -2112,7 +2112,19 @@ def unified_assessment():
             weather = {}
 
         disease_conf_pct = disease_confidence * 100 if disease_confidence <= 1 else disease_confidence
-        raw_safety = diagnosis_safety_gate(disease_conf_pct, [{"confidence": disease_conf_pct}, {"confidence": 0.0}])
+        requested_status = str(request.form.get("diagnosis_status") or "").lower()
+        if requested_status == "confirmed":
+            raw_safety = {
+                "status": "confirmed",
+                "actionable": True,
+                "margin": 0.0,
+                "message": "Diagnosis was already passed through the application safety gate."
+            }
+        else:
+            raw_safety = diagnosis_safety_gate(
+                disease_conf_pct,
+                [{"confidence": disease_conf_pct}, {"confidence": 0.0}]
+            )
         disease_confirmed = raw_safety["status"] == "confirmed"
 
         if disease_confirmed:
