@@ -13,7 +13,6 @@ from PIL import Image
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-tf = None
 
 
 # ============================================================
@@ -196,21 +195,18 @@ def load_model():
     global interpreter
     global input_details
     global output_details
-    global tf
-
-    if tf is None:
-        try:
-            import tensorflow as _tf
-            tf = _tf
-        except Exception as e:
-            raise RuntimeError(f"TensorFlow import failed: {e}")
 
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(
             f"TFLite model not found: {MODEL_PATH}"
         )
 
-    interpreter = tf.lite.Interpreter(
+    try:
+        from ai_edge_litert.interpreter import Interpreter
+    except Exception as e:
+        raise RuntimeError(f"LiteRT import failed: {e}")
+
+    interpreter = Interpreter(
         model_path=MODEL_PATH
     )
 
