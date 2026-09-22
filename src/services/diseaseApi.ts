@@ -47,7 +47,7 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
     const apiBase =
       import.meta.env.VITE_API_BASE_URL ||
       import.meta.env.VITE_API_URL ||
-      'http://127.0.0.1:5000';
+      'https://krishi-rakshak-api.onrender.com';
 
     let advice = {
       treatment: ['Confirm the diagnosis before applying disease-specific treatment.'],

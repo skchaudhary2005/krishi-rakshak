@@ -54,7 +54,7 @@ const Result = () => {
         }
         form.append('weather', JSON.stringify(weather));
 
-        const response = await fetch((import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000') + '/api/unified-assessment', {
+        const response = await fetch((import.meta.env.VITE_API_BASE_URL || 'https://krishi-rakshak-api.onrender.com') + '/api/unified-assessment', {
           method: 'POST',
           body: form,
         });
