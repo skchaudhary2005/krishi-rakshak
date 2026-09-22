@@ -32,6 +32,12 @@ const normalizeLabel = (value: string) =>
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 
+const marginPreview = (mlResult: any) => {
+  const top = mlResult.topPredictions || [];
+  const second = top[1]?.confidence ?? 0;
+  return Math.max(0, mlResult.confidence - second);
+};
+
 const visionAgrees = (vision: any, mlResult: any) => {
   if (!vision) return false;
   if (vision.agreement !== 'agree') return false;
@@ -99,7 +105,11 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
       'https://krishi-rakshak-api.onrender.com';
 
     let visionAnalysis: any = null;
+    const shouldRunVision =
+      mlResult.confidence < ML_CONFIRM_THRESHOLD ||
+      marginPreview(mlResult) < ML_MIN_MARGIN;
 
+    if (shouldRunVision) {
     try {
       const visionForm = new FormData();
       visionForm.append('image', image);
@@ -123,6 +133,7 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
     } catch (visionError) {
       console.warn('⚠️ Gemini Vision unavailable:', visionError);
     }
+    }
 
     const topPredictions = mlResult.topPredictions || [];
     const secondConfidence = topPredictions[1]?.confidence ?? 0;
@@ -140,9 +151,11 @@ export const detectDisease = async (image: File): Promise<DiseaseResult> => {
     } else if (visionAnalysis && (visionAnalysis.agreement === 'disagree' || visionAnalysis.agreement === 'uncertain')) {
       diagnosisStatus = 'review';
       diagnosisMessage = 'ML and independent visual analysis do not provide sufficient agreement.';
-    } else if (mlStrongEnough && visionAgrees(visionAnalysis, mlResult)) {
+    } else if (mlStrongEnough && (!visionAnalysis || visionAgrees(visionAnalysis, mlResult))) {
       diagnosisStatus = 'confirmed';
-      diagnosisMessage = 'Strong ML evidence and independent visual agreement were obtained.';
+      diagnosisMessage = visionAnalysis
+        ? 'Strong ML evidence and independent visual agreement were obtained.'
+        : 'Strong ML evidence passed the primary safety gate; visual verification was not required.';
     } else {
       diagnosisStatus = 'review';
       diagnosisMessage = visionAnalysis
