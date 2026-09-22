@@ -22,7 +22,7 @@ class AiChatScreen extends StatefulWidget {
 }
 
 class _AiChatScreenState extends State<AiChatScreen> {
-  static const String backendUrl = 'https://krishi-rakshak-vtla.onrender.com';
+  static const String backendUrl = 'https://krishi-rakshak-api.onrender.com';
 
   final TextEditingController controller = TextEditingController();
   final ScrollController scroll = ScrollController();
@@ -101,7 +101,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
             }),
           )
           .timeout(
-            const Duration(seconds: 60),
+            const Duration(seconds: 10),
           );
 
       debugPrint('AI CHAT HTTP: ${response.statusCode}');
