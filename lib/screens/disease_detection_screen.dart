@@ -319,62 +319,64 @@ class _DiseaseDetectionScreenState extends State<DiseaseDetectionScreen> {
 
     final p = Map<String, dynamic>.from(prediction);
 
-    final detectedDisease =
+    final rawDisease =
         p['class_name']?.toString() ??
         p['disease']?.toString() ??
         'Unknown';
 
-    final detectedConfidence = _toPercent(
-      p['confidence'],
-    );
-
-    final detectedSeverity =
-        p['severity']?.toString() ?? '';
+    final detectedConfidence = _toPercent(p['confidence']);
+    final detectedSeverity = p['severity']?.toString() ?? '';
+    final serverDiagnosisStatus =
+        p['diagnosis_status']?.toString().toLowerCase() ?? 'uncertain';
+    final diagnosisConfirmed = serverDiagnosisStatus == 'confirmed';
 
     final onlinePredictionId =
         data['prediction_id']?.toString() ?? '';
 
-    final governmentAlert = data['government_alert'];
-
     String alertId = '';
-
-    if (governmentAlert is Map) {
-      alertId =
-          governmentAlert['alert_id']?.toString() ?? '';
+    final governmentAlert = data['government_alert'];
+    if (diagnosisConfirmed && governmentAlert is Map) {
+      alertId = governmentAlert['alert_id']?.toString() ?? '';
     }
 
-    final detectedCrop = _extractCrop(
-      detectedDisease,
-    );
+    final detectedCrop = _extractCrop(rawDisease);
+    final displayDisease = diagnosisConfirmed
+        ? rawDisease
+        : 'Diagnosis uncertain — rescan required';
 
     if (!mounted) return;
 
     setState(() {
-      disease = detectedDisease;
+      disease = displayDisease;
       confidence = detectedConfidence;
       crop = detectedCrop;
-      severity = detectedSeverity;
+      severity = diagnosisConfirmed ? detectedSeverity : 'requires confirmation';
       predictionId = onlinePredictionId;
       governmentAlertId = alertId;
 
-      description = _descriptionFor(detectedDisease);
-      treatment = _treatmentFor(detectedDisease);
-      prevention = _preventionFor(detectedDisease);
-      farmerAction = _farmerActionFor(detectedDisease);
+      if (diagnosisConfirmed) {
+        description = _descriptionFor(rawDisease);
+        treatment = _treatmentFor(rawDisease);
+        prevention = _preventionFor(rawDisease);
+        farmerAction = _farmerActionFor(rawDisease);
+      } else {
+        description = 'The model produced a candidate disease, but the evidence is not sufficient to confirm it.';
+        treatment = 'Do NOT apply disease-specific fungicide, pesticide, or other chemical treatment from this scan. Confirm the diagnosis with a clear leaf photo and qualified local agricultural guidance.';
+        prevention = 'Inspect several plants, capture clear close-up photos of affected leaves, and avoid unnecessary chemical treatment until the diagnosis is confirmed.';
+        farmerAction = 'Consult a KVK or qualified agriculture expert before taking disease-specific action.';
+      }
     });
 
-    await _fetchOnlineAdvice(
-      detectedDisease,
-      detectedCrop,
-      detectedConfidence,
-    );
+    if (diagnosisConfirmed) {
+      await _fetchOnlineAdvice(rawDisease, detectedCrop, detectedConfidence);
+    }
 
     await _saveHistory(
       predictionId: onlinePredictionId,
-      className: detectedDisease,
+      className: rawDisease,
       confidence: detectedConfidence,
       crop: detectedCrop,
-      severity: detectedSeverity,
+      severity: diagnosisConfirmed ? detectedSeverity : 'requires confirmation',
       mode: 'ONLINE',
       governmentAlert: alertId.isNotEmpty,
     );
@@ -496,43 +498,34 @@ class _DiseaseDetectionScreenState extends State<DiseaseDetectionScreen> {
 
     final predictedClass = _classes[bestIndex];
     final predictedCrop = _extractCrop(predictedClass);
-    final predictedSeverity = _calculateSeverity(
-      predictedClass,
-      bestProbability * 100,
-    );
-
+    final rawConfidence = bestProbability * 100;
     final offlinePredictionId =
         'offline-${DateTime.now().millisecondsSinceEpoch}';
+
+    // Offline mode has no independent visual verification. Never turn the
+    // local classifier into a confirmed diagnosis or disease-specific treatment.
+    const displayDisease = 'Diagnosis uncertain — rescan required';
+    const safeSeverity = 'requires confirmation';
 
     if (!mounted) return;
 
     setState(() {
-      disease = predictedClass;
+      disease = displayDisease;
       crop = predictedCrop;
-      confidence = bestProbability * 100;
-      severity = predictedSeverity;
+      confidence = rawConfidence;
+      severity = safeSeverity;
       predictionId = offlinePredictionId;
 
-      description = _descriptionFor(predictedClass);
-      treatment = _treatmentFor(predictedClass);
-      prevention = _preventionFor(predictedClass);
-      farmerAction = _farmerActionFor(predictedClass);
+      description = 'Offline AI produced a candidate (${predictedClass}) at ${rawConfidence.toStringAsFixed(1)}% confidence, but it cannot confirm the disease safely without independent verification.';
+      treatment = 'Do NOT apply disease-specific fungicide, pesticide, or other chemical treatment from this offline scan. Confirm the diagnosis with a clear leaf photo and qualified local agricultural guidance.';
+      prevention = 'Inspect several plants, capture clear close-up photos of affected leaves, and avoid unnecessary chemical treatment until the diagnosis is confirmed.';
+      farmerAction = 'When connectivity is available, rescan online or consult a KVK/agriculture expert before disease-specific action.';
     });
 
-    final shouldAlert = _governmentAlertRequired(
-      predictedClass,
-      confidence,
-      predictedSeverity,
-    );
+    const shouldAlert = false;
 
     if (shouldAlert) {
-      await _savePendingAlert(
-        predictionId: offlinePredictionId,
-        classId: bestIndex,
-        className: predictedClass,
-        confidence: confidence,
-        severity: predictedSeverity,
-      );
+      // Safety gate intentionally prevents disease alerts from an unverified offline prediction.
     }
 
     await _saveHistory(
@@ -549,8 +542,9 @@ class _DiseaseDetectionScreenState extends State<DiseaseDetectionScreen> {
     debugPrint('Class: $predictedClass');
     debugPrint('Class ID: $bestIndex');
     debugPrint('Confidence: ${confidence.toStringAsFixed(2)}%');
-    debugPrint('Severity: $predictedSeverity');
-    debugPrint('Government alert queued: $shouldAlert');
+    debugPrint('Severity: $safeSeverity');
+    debugPrint('Safety gate: diagnosis withheld in offline mode');
+    debugPrint('Government alert queued: false');
   }
 
   Future<void> _saveHistory({
@@ -798,589 +792,3 @@ class _DiseaseDetectionScreenState extends State<DiseaseDetectionScreen> {
   }
 
   Future<void> _syncPendingAlerts() async {
-    if (syncing) return;
-
-    setStateIfMounted(() {
-      syncing = true;
-    });
-
-    try {
-      final connectivity = await Connectivity().checkConnectivity();
-
-      if (connectivity.contains(ConnectivityResult.none)) {
-        return;
-      }
-
-      final prefs = await SharedPreferences.getInstance();
-
-      final raw = prefs.getStringList(pendingKey) ?? [];
-
-      if (raw.isEmpty) return;
-
-      final remaining = <String>[];
-
-      for (final item in raw) {
-        try {
-          final decoded = jsonDecode(item);
-
-          if (decoded is! Map) {
-            continue;
-          }
-
-          final alert = Map<String, dynamic>.from(decoded);
-
-          final response = await http.post(
-            Uri.parse('$backendUrl/api/government/alert'),
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode(alert),
-          ).timeout(
-            const Duration(seconds: 10),
-          );
-
-          if (response.statusCode >= 200 &&
-              response.statusCode < 300) {
-            debugPrint(
-              'PENDING ALERT SYNCED: ${response.body}',
-            );
-          } else {
-            remaining.add(item);
-          }
-        } catch (e) {
-          debugPrint('PENDING ALERT SYNC FAILED: $e');
-          remaining.add(item);
-        }
-      }
-
-      await prefs.setStringList(
-        pendingKey,
-        remaining,
-      );
-
-      if (remaining.isEmpty && raw.isNotEmpty && mounted) {
-        message('Pending government alerts synced successfully.');
-      }
-    } finally {
-      setStateIfMounted(() {
-        syncing = false;
-      });
-    }
-  }
-
-  void setStateIfMounted(VoidCallback callback) {
-    if (mounted) setState(callback);
-  }
-
-  double _toPercent(dynamic value) {
-    if (value == null) return 0;
-
-    double result;
-
-    if (value is num) {
-      result = value.toDouble();
-    } else {
-      result = double.tryParse(value.toString()) ?? 0;
-    }
-
-    if (result > 0 && result <= 1) {
-      result *= 100;
-    }
-
-    return result;
-  }
-
-  void message(String text) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(text)),
-    );
-  }
-
-  void showResult() {
-    final lang = LanguageScope.of(context).value;
-
-    final displayDisease = disease.isEmpty
-        ? 'Unknown'
-        : diseaseLabel(disease, lang);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(28),
-        ),
-      ),
-      builder: (c) {
-        return SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 45,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: Colors.black12,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Center(
-                  child: Icon(
-                    Icons.auto_awesome_rounded,
-                    size: 58,
-                    color: Color(0xFF2E7D32),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Center(
-                  child: Text(
-                    tr(context, 'complete'),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 23,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: analysisMode == 'ONLINE'
-                          ? const Color(0xFFE3F2FD)
-                          : const Color(0xFFE8F5E9),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          analysisMode == 'ONLINE'
-                              ? Icons.cloud_done_rounded
-                              : Icons.offline_bolt_rounded,
-                          size: 18,
-                          color: analysisMode == 'ONLINE'
-                              ? Colors.blue.shade700
-                              : const Color(0xFF2E7D32),
-                        ),
-                        const SizedBox(width: 7),
-                        Text(
-                          analysisMode == 'ONLINE'
-                              ? tr(context, 'onlineAI')
-                              : tr(context, 'offlineAI'),
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: analysisMode == 'ONLINE'
-                                ? Colors.blue.shade700
-                                : const Color(0xFF2E7D32),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 22),
-                resultCard(
-                  icon: Icons.local_florist_rounded,
-                  title: tr(context, 'detected'),
-                  text: displayDisease,
-                ),
-                const SizedBox(height: 12),
-                resultCard(
-                  icon: Icons.speed_rounded,
-                  title: tr(context, 'confidence'),
-                  text: '${confidence.toStringAsFixed(2)}%',
-                ),
-                if (crop.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  resultCard(
-                    icon: Icons.eco_rounded,
-                    title: tr(context, 'crop'),
-                    text: crop,
-                  ),
-                ],
-                if (severity.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  resultCard(
-                    icon: Icons.warning_amber_rounded,
-                    title: tr(context, 'severity'),
-                    text: severity,
-                  ),
-                ],
-                if (description.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  resultCard(icon: Icons.info_outline, title: tr(context, 'description'), text: description),
-                ],
-                if (treatment.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  resultCard(icon: Icons.medical_services_outlined, title: tr(context, 'treatment'), text: treatment),
-                ],
-                if (prevention.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  resultCard(icon: Icons.shield_outlined, title: tr(context, 'prevention'), text: prevention),
-                ],
-                if (farmerAction.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  resultCard(icon: Icons.agriculture, title: tr(context, 'farmerAction'), text: farmerAction),
-                ],
-                if (governmentAlertId.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  resultCard(
-                    icon: Icons.account_balance_rounded,
-                    title: tr(context, 'governmentAlert'),
-                    text:
-                        '${tr(context, 'alertCreated')}\nID: $governmentAlertId',
-                  ),
-                ] else if (analysisMode == 'OFFLINE' &&
-                    _governmentAlertRequired(
-                      disease,
-                      confidence,
-                      severity,
-                    )) ...[
-                  const SizedBox(height: 12),
-                  resultCard(
-                    icon: Icons.cloud_upload_outlined,
-                    title: tr(context, 'governmentAlert'),
-                    text:
-                        '${tr(context, 'alertWaiting')} '
-                        'It will be sent automatically when connectivity returns.',
-                  ),
-                ],
-                if (analysisMode == 'OFFLINE') ...[
-                  const SizedBox(height: 12),
-                  resultCard(
-                    icon: Icons.offline_bolt_rounded,
-                    title: tr(context, 'offlineMode'),
-                    text:
-                        'Prediction was generated directly on your device. '
-                        'Internet connection was not required.',
-                  ),
-                ],
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(c);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AiChatScreen(
-                            initialCrop: crop,
-                            initialDisease: disease,
-                            initialConfidence: confidence,
-                          ),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.smart_toy_outlined),
-                    label: Text(tr(context, 'askAI')),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(c),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2E7D32),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                    child: const Text(
-                      'Done',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget resultCard({
-    required IconData icon,
-    required String title,
-    required String text,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF7FAF6),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            icon,
-            color: const Color(0xFF2E7D32),
-            size: 25,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1B5E20),
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  text,
-                  style: const TextStyle(
-                    height: 1.45,
-                    fontSize: 15,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _interpreter?.close();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF4FAF2),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF2E7D32),
-        foregroundColor: Colors.white,
-        title: Text(tr(context, 'disease')),
-        actions: [
-          if (syncing)
-            const Padding(
-              padding: EdgeInsets.only(right: 16),
-              child: Center(
-                child: SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            )
-          else
-            IconButton(
-              tooltip: 'Sync pending alerts',
-              onPressed: _syncPendingAlerts,
-              icon: const Icon(Icons.sync_rounded),
-            ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            const Icon(
-              Icons.local_florist_rounded,
-              size: 70,
-              color: Color(0xFF2E7D32),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              tr(context, 'disease'),
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1B5E20),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              tr(context, 'help'),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.black54,
-              ),
-            ),
-            const SizedBox(height: 28),
-            Container(
-              width: double.infinity,
-              height: 280,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(
-                  color: const Color(0xFFA5D6A7),
-                ),
-              ),
-              child: image == null
-                  ? Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(
-                          Icons.add_a_photo_rounded,
-                          size: 65,
-                          color: Color(0xFF66BB6A),
-                        ),
-                        const SizedBox(height: 15),
-                        Text(
-                          tr(context, 'noImage'),
-                          style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          tr(context, 'choose'),
-                          style: const TextStyle(
-                            color: Colors.black45,
-                          ),
-                        ),
-                      ],
-                    )
-                  : ClipRRect(
-                      borderRadius: BorderRadius.circular(22),
-                      child: Image.memory(
-                        imageBytes!,
-                        width: double.infinity,
-                        height: 280,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-            ),
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: analyzing
-                        ? null
-                        : () => choose(ImageSource.camera),
-                    icon: const Icon(Icons.camera_alt_rounded),
-                    label: Text(tr(context, 'camera')),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: analyzing
-                        ? null
-                        : () => choose(ImageSource.gallery),
-                    icon: const Icon(Icons.photo_library_rounded),
-                    label: Text(tr(context, 'gallery')),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: analyzing || modelLoading
-                    ? null
-                    : analyze,
-                icon: analyzing
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.auto_awesome_rounded),
-                label: Text(
-                  modelLoading
-                      ? 'Loading 192-class AI model...'
-                      : analyzing
-                          ? 'AI is analyzing image...'
-                          : 'Analyze with AI',
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2E7D32),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 17,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Card(
-              child: SwitchListTile(
-                secondary: const Icon(Icons.offline_bolt_rounded, color: Color(0xFF2E7D32)),
-                title: const Text('Force Offline AI'),
-                subtitle: Text(forceOffline ? 'Using TFLite on this device' : 'Online AI first, then offline fallback'),
-                value: forceOffline,
-                onChanged: (value) async {
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setBool(forceOfflineKey, value);
-                  if (!mounted) return;
-                  setState(() => forceOffline = value);
-                },
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE8F5E9),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.cloud_sync_rounded,
-                    color: Color(0xFF1B5E20),
-                  ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Online AI is tried first. If the internet or server '
-                      'is unavailable, the 192-class AI runs on the device. '
-                      'Serious offline detections are saved and synced '
-                      'to the government system when internet returns.',
-                      style: TextStyle(
-                        color: Color(0xFF1B5E20),
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
