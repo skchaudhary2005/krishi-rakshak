@@ -1873,7 +1873,7 @@ def _language_instruction(language):
     return names.get(language, "English")
 
 
-def _local_chat_fallback(message, language, crop, disease, confidence):
+def _local_chat_fallback(message, language, crop, disease, confidence, history=None):
     """Fast offline fallback. It reacts to the actual question instead of one fixed answer."""
     q = message.lower()
     advice = _kr_disease_advice(disease, crop, language)
@@ -1927,7 +1927,7 @@ def _gemini_chat(message, language, crop, disease, confidence, history):
         if not isinstance(item, dict):
             continue
         role = "Farmer" if item.get("role") == "user" else "Krishi Rakshak"
-        content = str(item.get("content") or "").strip()
+        content = str(item.get("content") or item.get("text") or "").strip()
         if content:
             conversation.append(f"{role}: {content}")
 
