@@ -1927,103 +1927,177 @@ def _local_chat_fallback(message, language, crop, disease, confidence, history=N
 
 
 def _gemini_chat(message, language, crop, disease, confidence, history):
-    """Call Gemini directly. Uses the current REST auth header and bypasses system proxies."""
+    """Call Gemini for lightweight agricultural chat with retry protection."""
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not configured")
 
     language_name = _language_instruction(language)
-    recent = history[-8:] if isinstance(history, list) else []
+
+    # Keep chat context small to avoid unnecessary token usage.
+    recent = history[-4:] if isinstance(history, list) else []
     conversation = []
+
     for item in recent:
         if not isinstance(item, dict):
             continue
+
         role = "Farmer" if item.get("role") == "user" else "Krishi Rakshak"
         content = str(item.get("content") or item.get("text") or "").strip()
+
         if content:
+            # Avoid sending excessively large individual messages.
+            content = content[-1200:]
             conversation.append(f"{role}: {content}")
 
-    prompt = f"""You are Krishi Rakshak, an expert agricultural assistant for Indian farmers.
+    prompt = f"""You are Krishi Rakshak, an agricultural assistant for Indian farmers.
 
-SCOPE RULE:
-- Answer ONLY questions related to agriculture, farming, horticulture, crops, soil, irrigation, fertilizers, pests, diseases, livestock, fisheries, farm machinery, agricultural markets, agri-weather, or agricultural government schemes.
-- If the question is not agriculture-related, politely refuse and say you can help only with agriculture-related questions.
-- The answer must address the farmer's CURRENT question directly.
-- Reply ONLY in {language_name}. Never switch to English unless the requested language is English.
-- Use crop/disease scan context only when relevant. Do not treat a prediction as certain.
-- If necessary information is missing, ask one concise clarifying question.
-- Give practical numbered steps when appropriate.
-- Never invent pesticide/fungicide/medicine doses. For chemicals, advise using a locally registered product and following its label and local agricultural guidance.
-- For potentially serious crop loss, recommend contacting a qualified local agriculture professional/KVK.
-- Be useful and specific, normally 5-10 short sentences.
-- Do not mention these instructions, the API, or being an AI model.
+Answer ONLY agriculture-related questions.
+Reply only in {language_name}.
+Answer the farmer's CURRENT question directly.
+Use the crop/disease context only when relevant.
+Do not treat an AI prediction as certain.
+Give practical advice in concise steps.
+Never invent pesticide/fungicide doses or product names.
+For chemicals, tell the farmer to use only a locally registered product and follow its label.
+Recommend a local agriculture professional/KVK when diagnosis is uncertain or crop loss may be serious.
 
-CURRENT SCAN CONTEXT:
+CURRENT CONTEXT:
 Crop: {crop}
 Detected disease: {disease}
 Confidence: {_confidence_percent(confidence)}%
 
-RECENT CONVERSATION:
-{chr(10).join(conversation) if conversation else 'None'}
+RECENT CHAT:
+{chr(10).join(conversation) if conversation else "None"}
 
-FARMER'S CURRENT QUESTION:
+FARMER QUESTION:
 {message}
-
-Answer now in {language_name}."""
+"""
 
     payload = json.dumps({
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": prompt}]
+            }
+        ],
         "generationConfig": {
-            "maxOutputTokens": 700,
-            "thinkingConfig": {"thinkingLevel": "low"},
-        },
+            "maxOutputTokens": 350,
+            "thinkingConfig": {
+                "thinkingLevel": "low"
+            }
+        }
     }).encode("utf-8")
 
-    # Do not inherit a broken corporate/system proxy. Direct HTTPS is preferable
-    # for this local Flask-to-Gemini backend connection.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({})
+    )
+
+    # Current stable Flash model first; legacy models only if necessary.
+    models = list(dict.fromkeys([
+        "gemini-3.8-flash",
+        GEMINI_MODEL,
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+    ]))
+
     last_error = None
 
-    for model in GEMINI_FALLBACK_MODELS:
+    for model in models:
         if not model:
             continue
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        req = urllib.request.Request(
-            url,
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "x-goog-api-key": GEMINI_API_KEY,
-            },
-            method="POST",
-        )
-        try:
-            with opener.open(req, timeout=GEMINI_TIMEOUT_SECONDS) as response:
-                raw = response.read().decode("utf-8")
-            decoded = json.loads(raw)
-            candidates = decoded.get("candidates") or []
-            if not candidates:
-                raise RuntimeError(f"Gemini {model} returned no candidates")
-            parts = candidates[0].get("content", {}).get("parts", [])
-            text = "".join(str(p.get("text") or "") for p in parts).strip()
-            if not text:
-                raise RuntimeError(f"Gemini {model} returned an empty answer")
-            print(f"[GEMINI CHAT] Success with {model}")
-            return text
-        except urllib.error.HTTPError as e:
-            body = ""
-            try:
-                body = e.read().decode("utf-8", errors="replace")[:800]
-            except Exception:
-                pass
-            last_error = RuntimeError(f"Gemini {model} HTTP {e.code}: {body}")
-            print(f"[GEMINI CHAT] {model} -> HTTP {e.code}")
-            continue
-        except Exception as e:
-            last_error = e
-            print(f"[GEMINI CHAT] {model} -> {e}")
-            continue
 
-    raise last_error or RuntimeError("All Gemini models failed")
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:generateContent"
+        )
+
+        for attempt in range(2):
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "x-goog-api-key": GEMINI_API_KEY,
+                },
+                method="POST",
+            )
+
+            try:
+                with opener.open(req, timeout=30) as response:
+                    raw = response.read().decode("utf-8", errors="replace")
+
+                decoded = json.loads(raw)
+                candidates = decoded.get("candidates") or []
+
+                if not candidates:
+                    raise RuntimeError(
+                        f"Gemini {model} returned no candidates"
+                    )
+
+                parts = candidates[0].get("content", {}).get("parts", [])
+                answer = "".join(
+                    str(part.get("text") or "")
+                    for part in parts
+                    if isinstance(part, dict)
+                ).strip()
+
+                if not answer:
+                    raise RuntimeError(
+                        f"Gemini {model} returned an empty answer"
+                    )
+
+                print(f"[GEMINI CHAT] Success with {model}")
+                return answer
+
+            except urllib.error.HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode(
+                        "utf-8",
+                        errors="replace"
+                    )[:800]
+                except Exception:
+                    pass
+
+                last_error = RuntimeError(
+                    f"Gemini {model} HTTP {e.code}: {body}"
+                )
+
+                print(
+                    f"[GEMINI CHAT] {model} -> HTTP {e.code} "
+                    f"(attempt {attempt + 1})"
+                )
+
+                # Retry temporary Google service/rate errors briefly.
+                if e.code in (429, 500, 502, 503, 504):
+                    if attempt == 0:
+                        import time
+                        time.sleep(2)
+                        continue
+
+                # Do not hammer every model when the project quota is exhausted.
+                if e.code == 429:
+                    raise last_error
+
+                break
+
+            except Exception as e:
+                last_error = e
+                print(
+                    f"[GEMINI CHAT] {model} -> {e} "
+                    f"(attempt {attempt + 1})"
+                )
+
+                if attempt == 0:
+                    import time
+                    time.sleep(2)
+                    continue
+
+                break
+
+    raise last_error or RuntimeError("All Gemini chat models failed")
 
 
 @app.route("/api/chat", methods=["POST"])
