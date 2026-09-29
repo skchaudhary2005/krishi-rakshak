@@ -586,15 +586,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
                         ),
                       ],
                     ),
-                    child: Text(
+                    child: _buildMessageContent(
                       content,
-                      style: TextStyle(
-                        color: isUser
-                            ? Colors.white
-                            : Colors.black87,
-                        height: 1.45,
-                        fontSize: 15,
-                      ),
+                      isUser,
                     ),
                   ),
                 );
@@ -659,6 +653,93 @@ class _AiChatScreenState extends State<AiChatScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildMessageContent(String content, bool isUser) {
+    final baseColor = isUser ? Colors.white : Colors.black87;
+    final lines = content.split('\n');
+    final spans = <TextSpan>[];
+
+    for (int i = 0; i < lines.length; i++) {
+      var line = lines[i].trimRight();
+      final trimmedLine = line.trimLeft();
+
+      TextStyle style = TextStyle(
+        color: baseColor,
+        height: 1.5,
+        fontSize: 15,
+      );
+
+      if (trimmedLine.startsWith('### ')) {
+        line = trimmedLine.substring(4);
+        style = style.copyWith(
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+        );
+      } else if (trimmedLine.startsWith('## ')) {
+        line = trimmedLine.substring(3);
+        style = style.copyWith(
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+        );
+      } else if (trimmedLine.startsWith('# ')) {
+        line = trimmedLine.substring(2);
+        style = style.copyWith(
+          fontSize: 19,
+          fontWeight: FontWeight.w700,
+        );
+      } else if (trimmedLine.startsWith('* ') ||
+          trimmedLine.startsWith('- ')) {
+        line = '• ${trimmedLine.substring(2)}';
+      }
+
+      final boldPattern = RegExp(r'\\*\\*(.+?)\\*\\*');
+      var cursor = 0;
+
+      for (final match in boldPattern.allMatches(line)) {
+        if (match.start > cursor) {
+          spans.add(
+            TextSpan(
+              text: line.substring(cursor, match.start),
+              style: style,
+            ),
+          );
+        }
+
+        spans.add(
+          TextSpan(
+            text: match.group(1),
+            style: style.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        );
+
+        cursor = match.end;
+      }
+
+      if (cursor < line.length) {
+        spans.add(
+          TextSpan(
+            text: line.substring(cursor),
+            style: style,
+          ),
+        );
+      }
+
+      if (i < lines.length - 1) {
+        spans.add(
+          TextSpan(
+            text: '\n',
+            style: style,
+          ),
+        );
+      }
+    }
+
+    return SelectableText.rich(
+      TextSpan(children: spans),
     );
   }
 
