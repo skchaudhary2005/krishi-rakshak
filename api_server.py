@@ -1934,7 +1934,7 @@ def _gemini_chat(message, language, crop, disease, confidence, history):
     language_name = _language_instruction(language)
 
     # Keep chat context small to avoid unnecessary token usage.
-    recent = history[-4:] if isinstance(history, list) else []
+    recent = history[-5:-1] if isinstance(history, list) and len(history) > 1 else []
     conversation = []
 
     for item in recent:
@@ -1990,7 +1990,7 @@ FARMER QUESTION:
             }
         ],
         "generationConfig": {
-            "maxOutputTokens": 16384,
+            "maxOutputTokens": 4096,
             "thinkingConfig": {
                 "thinkingLevel": "low"
             }
