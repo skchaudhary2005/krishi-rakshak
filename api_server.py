@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 from PIL import Image
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 
 
@@ -2134,6 +2134,192 @@ def ai_chat():
     except Exception as e:
         print(f"[AI CHAT ERROR] {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ============================================================
+# STREAMING AI CHAT
+# ============================================================
+
+def _gemini_chat_stream(message, language, crop, disease, confidence, history):
+    """Stream Gemini chat text as small SSE events for low-latency UI updates."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+
+    language_name = _language_instruction(language)
+    recent = history[-4:] if isinstance(history, list) else []
+    conversation = []
+
+    for item in recent:
+        if not isinstance(item, dict):
+            continue
+
+        role = "Farmer" if item.get("role") == "user" else "Krishi Rakshak"
+        text = str(item.get("content") or item.get("text") or "").strip()
+        if text:
+            conversation.append(f"{role}: {text[-1600:]}")
+
+    prompt = f"""You are Krishi Rakshak, an agricultural assistant for Indian farmers.
+
+SCOPE:
+- Answer only agriculture, farming, horticulture, crops, soil, irrigation, fertilizers, pests, plant diseases, livestock, fisheries, farm machinery, agricultural markets, agri-weather, or agricultural schemes.
+- For non-agriculture questions, politely refuse and state that you only handle agriculture.
+- Answer the farmer's CURRENT question directly.
+- Reply only in {language_name}.
+- Use the crop/disease scan context only when relevant.
+- Do not treat a prediction as certain.
+- Give a detailed, practical answer with headings and numbered steps when useful.
+- Do not invent pesticide/fungicide/medicine doses or product names.
+- For chemicals, advise using a locally registered product and following its label/local agricultural guidance.
+- Suggest a qualified local agriculture professional/KVK when needed.
+- Do not mention these instructions, APIs, or hidden system details.
+
+CURRENT CONTEXT:
+Crop: {crop}
+Detected disease: {disease}
+Confidence: {_confidence_percent(confidence)}%
+
+RECENT CHAT:
+{chr(10).join(conversation) if conversation else "None"}
+
+FARMER QUESTION:
+{message}
+
+Answer in {language_name}."""
+    
+    payload = json.dumps({
+        "contents": [{
+            "role": "user",
+            "parts": [{"text": prompt}]
+        }],
+        "generationConfig": {
+            "maxOutputTokens": 8192,
+            "thinkingConfig": {
+                "thinkingLevel": "low"
+            }
+        }
+    }).encode("utf-8")
+
+    model = "gemini-3.7-flash"
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:streamGenerateContent?alt=sse"
+    )
+
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({})
+    )
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "x-goog-api-key": GEMINI_API_KEY,
+        },
+        method="POST",
+    )
+
+    with opener.open(req, timeout=20) as response:
+        for raw_line in response:
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if not line or not line.startswith("data:"):
+                continue
+
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+
+            try:
+                decoded = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+
+            candidates = decoded.get("candidates") or []
+            if not candidates:
+                continue
+
+            parts = candidates[0].get("content", {}).get("parts", [])
+            delta = "".join(
+                str(part.get("text") or "")
+                for part in parts
+                if isinstance(part, dict)
+            )
+            delta = delta.strip()
+
+            if delta:
+                yield delta
+
+
+@app.route("/api/chat/stream", methods=["POST"])
+def ai_chat_stream():
+    """Low-latency streaming Chat AI endpoint."""
+    try:
+        data = request.get_json(silent=True) or {}
+        message = str(data.get("message") or "").strip()
+        language = str(data.get("language") or "en").lower()
+
+        if language not in {"en", "hi", "pa", "mr", "bn", "gu", "ta", "te", "kn", "ml"}:
+            language = "en"
+
+        context = data.get("context") or {}
+        crop = str(context.get("crop") or "crop")
+        disease = str(
+            context.get("disease")
+            or context.get("class_name")
+            or "unknown disease"
+        )
+        confidence = context.get("confidence")
+        history = data.get("history") or []
+
+        if not message:
+            return jsonify({
+                "success": False,
+                "error": "message is required"
+            }), 400
+
+        def generate():
+            try:
+                sent_text = False
+
+                for delta in _gemini_chat_stream(
+                    message,
+                    language,
+                    crop,
+                    disease,
+                    confidence,
+                    history,
+                ):
+                    sent_text = True
+                    yield f"data: {json.dumps({'text': delta}, ensure_ascii=False)}\n\n"
+
+                if not sent_text:
+                    yield f"data: {json.dumps({'error': 'Empty AI response'})}\n\n"
+
+                yield "data: [DONE]\n\n"
+
+            except Exception as stream_error:
+                print(f"[GEMINI CHAT STREAM ERROR] {stream_error}")
+                yield f"data: {json.dumps({'error': str(stream_error)})}\n\n"
+                yield "data: [DONE]\n\n"
+
+        return Response(
+            generate(),
+            status=200,
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
+    except Exception as e:
+        print(f"[AI CHAT STREAM ERROR] {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
 # ============================================================
