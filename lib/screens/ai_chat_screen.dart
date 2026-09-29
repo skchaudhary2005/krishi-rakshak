@@ -82,117 +82,48 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
     _scrollToBottom();
 
-    final client = http.Client();
-    int assistantIndex = -1;
-    bool receivedText = false;
-    bool streamDone = false;
-
     try {
-      final request = http.Request(
-        'POST',
-        Uri.parse('$backendUrl/api/chat/stream'),
-      );
-
-      request.headers['Content-Type'] = 'application/json';
-      request.headers['Accept'] = 'text/event-stream';
-
-      request.body = jsonEncode({
-        'message': text,
-        'language': selectedLanguage,
-        'context': {
-          'crop': widget.initialCrop,
-          'disease': widget.initialDisease,
-          'confidence': widget.initialConfidence,
-        },
-        'history': messages,
-      });
-
-      final response = await client.send(request).timeout(
-        const Duration(seconds: 12),
-      );
-
-      if (response.statusCode != 200) {
-        throw Exception('AI server error: HTTP ${response.statusCode}');
-      }
-
-      final decoder = response.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter());
-
-      final buffer = <String>[];
-
-      await for (final line in decoder.timeout(
-        const Duration(seconds: 20),
-        onTimeout: (sink) {
-          sink.addError(
-            TimeoutException('AI response timed out'),
+      final response = await http
+          .post(
+            Uri.parse('$backendUrl/api/chat'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode({
+              'message': text,
+              'language': selectedLanguage,
+              'context': {
+                'crop': widget.initialCrop,
+                'disease': widget.initialDisease,
+                'confidence': widget.initialConfidence,
+              },
+              'history': messages,
+            }),
+          )
+          .timeout(
+            const Duration(seconds: 40),
           );
-          sink.close();
-        },
-      )) {
-        final trimmed = line.trimRight();
 
-        if (trimmed.isEmpty) {
-          if (buffer.isEmpty) {
-            continue;
-          }
+      debugPrint('AI CHAT HTTP: ${response.statusCode}');
+      debugPrint('AI CHAT RESPONSE: ${response.body}');
 
-          final event = buffer.join('\n');
-          buffer.clear();
+      final decoded = jsonDecode(response.body);
 
-          if (!event.startsWith('data:')) {
-            continue;
-          }
-
-          final data = event.substring(5).trim();
-
-          if (data == '[DONE]') {
-            streamDone = true;
-            break;
-          }
-
-          final decoded = jsonDecode(data);
-
-          if (decoded is Map && decoded['error'] != null) {
-            throw Exception(decoded['error'].toString());
-          }
-
-          if (decoded is! Map) {
-            continue;
-          }
-
-          final delta = decoded['text']?.toString() ?? '';
-          if (delta.isEmpty) {
-            continue;
-          }
-
-          receivedText = true;
-
-          if (!mounted) {
-            return;
-          }
-
-          setState(() {
-            if (assistantIndex == -1) {
-              messages.add({
-                'role': 'assistant',
-                'content': delta,
-              });
-              assistantIndex = messages.length - 1;
-            } else {
-              final current = messages[assistantIndex]['content'] ?? '';
-              messages[assistantIndex]['content'] = current + delta;
-            }
-          });
-
-          _scrollToBottom();
-        } else if (trimmed.startsWith('data:')) {
-          buffer.add(trimmed);
-        }
+      if (response.statusCode != 200 ||
+          decoded is! Map ||
+          decoded['success'] != true) {
+        throw Exception(
+          decoded is Map
+              ? decoded['error']?.toString() ?? 'AI server error'
+              : 'AI server error',
+        );
       }
 
-      if (!streamDone && !receivedText) {
-        throw Exception('AI response ended without content');
+      final answer = decoded['reply']?.toString().trim();
+
+      if (answer == null || answer.isEmpty) {
+        throw Exception('Empty AI response');
       }
 
       if (!mounted) {
@@ -200,30 +131,30 @@ class _AiChatScreenState extends State<AiChatScreen> {
       }
 
       setState(() {
+        messages.add({
+          'role': 'assistant',
+          'content': answer,
+        });
         loading = false;
       });
 
       _scrollToBottom();
     } catch (e) {
-      debugPrint('AI CHAT STREAM FAILED: $e');
+      debugPrint('AI CHAT FAILED: $e');
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        if (!receivedText) {
-          messages.add({
-            'role': 'assistant',
-            'content': _localAiReply(text),
-          });
-        }
+        messages.add({
+          'role': 'assistant',
+          'content': 'AI response could not be loaded right now. Please try again.',
+        });
         loading = false;
       });
 
       _scrollToBottom();
-    } finally {
-      client.close();
     }
   }
 
