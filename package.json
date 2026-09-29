@@ -1,0 +1,1 @@
+{"name":"krishi-rakshak-web","private":true,"version":"3.0.0","type":"module","scripts":{"dev":"vite","build":"vite build","preview":"vite preview"},"dependencies":{"@splinetool/viewer":"^2.0.59","lucide-react":"latest","react":"latest","react-dom":"latest"},"devDependencies":{"@vitejs/plugin-react":"latest","vite":"latest"}}
