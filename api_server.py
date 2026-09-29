@@ -2007,7 +2007,7 @@ FARMER QUESTION:
             f"{model}:generateContent"
         )
 
-        for attempt in range(2):
+        for attempt in range(1):
             req = urllib.request.Request(
                 url,
                 data=payload,
@@ -2020,7 +2020,7 @@ FARMER QUESTION:
             )
 
             try:
-                with opener.open(req, timeout=30) as response:
+                with opener.open(req, timeout=25) as response:
                     raw = response.read().decode("utf-8", errors="replace")
 
                 decoded = json.loads(raw)
