@@ -2748,6 +2748,20 @@ except Exception as e:
     raise
 
 
+try:
+    from smart_vision_endpoint import register_smart_vision_endpoint
+
+    register_smart_vision_endpoint(
+        app,
+        predict_image,
+        GEMINI_API_KEY,
+        GEMINI_FALLBACK_MODELS,
+    )
+
+    print("[SMART VISION] /api/predict-smart registered")
+except Exception as exc:
+    print(f"[SMART VISION] Endpoint registration failed: {exc}")
+
 if __name__ == "__main__":
 
     print()
