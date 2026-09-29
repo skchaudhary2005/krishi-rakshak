@@ -2245,9 +2245,7 @@ Answer in {language_name}."""
                 for part in parts
                 if isinstance(part, dict)
             )
-            delta = delta.strip()
-
-            if delta:
+            if delta.strip():
                 yield delta
 
 
