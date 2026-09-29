@@ -102,7 +102,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
             }),
           )
           .timeout(
-            const Duration(seconds: 40),
+            const Duration(seconds: 35),
           );
 
       debugPrint('AI CHAT HTTP: ${response.statusCode}');
