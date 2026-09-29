@@ -2003,7 +2003,7 @@ FARMER QUESTION:
 
     # Current stable Flash model first; legacy models only if necessary.
     # Use one stable Flash model for faster Chat responses.
-    models = ['gemini-3.7-flash']
+    models = ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
 
     last_error = None
 
@@ -2029,7 +2029,7 @@ FARMER QUESTION:
             )
 
             try:
-                with opener.open(req, timeout=25) as response:
+                with opener.open(req, timeout=30) as response:
                     raw = response.read().decode("utf-8", errors="replace")
 
                 decoded = json.loads(raw)
@@ -2201,7 +2201,7 @@ Answer in {language_name}."""
             "parts": [{"text": prompt}]
         }],
         "generationConfig": {
-            "maxOutputTokens": 8192,
+            "maxOutputTokens": 4096,
             "thinkingConfig": {
                 "thinkingLevel": "low"
             }
