@@ -64,7 +64,7 @@ GEMINI_FALLBACK_MODELS = list(dict.fromkeys([
     "gemini-3.5-flash-lite",
     "gemini-3.5-flash",
 ]))
-GEMINI_TIMEOUT_SECONDS = 8
+GEMINI_TIMEOUT_SECONDS = 30
 
 # ============================================================
 # DIAGNOSIS SAFETY GATE
@@ -1873,7 +1873,18 @@ def _language_instruction(language):
     return names.get(language, "English")
 
 
-def _local_chat_fallback(message, language, crop, disease, confidence):
+def _confidence_percent(value):
+    if value is None:
+        return "N/A"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if 0 <= numeric <= 1:
+        numeric *= 100
+    return f"{numeric:.1f}".rstrip("0").rstrip(".")
+
+def _local_chat_fallback(message, language, crop, disease, confidence, history=None):
     """Fast offline fallback. It reacts to the actual question instead of one fixed answer."""
     q = message.lower()
     advice = _kr_disease_advice(disease, crop, language)
@@ -1905,7 +1916,7 @@ def _local_chat_fallback(message, language, crop, disease, confidence):
     if any(x in q for x in ["disease", "problem", "symptom", "रोग", "बीमारी", "लक्षण", "समस्या"]):
         return advice["summary"]
 
-    confidence_text = str(confidence) if confidence is not None else "N/A"
+    confidence_text = _confidence_percent(confidence)
     templates = {
         "en": f"For your question about {crop}, the current scan context is {disease} ({confidence_text}% confidence). {advice['farmer_action']} If you tell me the visible symptoms, crop age and recent weather/irrigation, I can narrow the guidance.",
         "hi": f"आपके {crop} से जुड़े सवाल के लिए वर्तमान स्कैन में {disease} ({confidence_text}% विश्वसनीयता) दिखा है। {advice['farmer_action']} अगर आप दिखाई देने वाले लक्षण, फसल की उम्र और हाल का मौसम/सिंचाई बताएँ, तो मैं सलाह को और सटीक कर सकता हूँ।",
@@ -1927,7 +1938,7 @@ def _gemini_chat(message, language, crop, disease, confidence, history):
         if not isinstance(item, dict):
             continue
         role = "Farmer" if item.get("role") == "user" else "Krishi Rakshak"
-        content = str(item.get("content") or "").strip()
+        content = str(item.get("content") or item.get("text") or "").strip()
         if content:
             conversation.append(f"{role}: {content}")
 
@@ -1949,7 +1960,7 @@ SCOPE RULE:
 CURRENT SCAN CONTEXT:
 Crop: {crop}
 Detected disease: {disease}
-Confidence: {confidence if confidence is not None else 'N/A'}%
+Confidence: {_confidence_percent(confidence)}%
 
 RECENT CONVERSATION:
 {chr(10).join(conversation) if conversation else 'None'}
@@ -2519,3 +2530,5 @@ if __name__ == "__main__":
         port=PORT,
         debug=False
     )
+
+
