@@ -92,7 +92,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
             },
             body: jsonEncode({
               'message': text,
-              'language': selectedLanguage,
+              'language': _detectQueryLanguage(text, selectedLanguage),
               'context': {
                 'crop': widget.initialCrop,
                 'disease': widget.initialDisease,
@@ -500,6 +500,36 @@ class _AiChatScreenState extends State<AiChatScreen> {
   // ============================================================
   // SCROLL
   // ============================================================
+
+  String _detectQueryLanguage(String text, String selected) {
+    final q = text.trim();
+    if (q.isEmpty) return selected;
+
+    if (RegExp(r'[\\u0B80-\\u0BFF]').hasMatch(q)) return 'ta';
+    if (RegExp(r'[\\u0C00-\\u0C7F]').hasMatch(q)) return 'te';
+    if (RegExp(r'[\\u0C80-\\u0CFF]').hasMatch(q)) return 'kn';
+    if (RegExp(r'[\\u0D00-\\u0D7F]').hasMatch(q)) return 'ml';
+    if (RegExp(r'[\\u0980-\\u09FF]').hasMatch(q)) return 'bn';
+    if (RegExp(r'[\\u0A80-\\u0AFF]').hasMatch(q)) return 'gu';
+    if (RegExp(r'[\\u0A00-\\u0A7F]').hasMatch(q)) return 'pa';
+    if (RegExp(r'[\\u0900-\\u097F]').hasMatch(q)) return selected == 'mr' ? 'mr' : 'hi';
+
+    final lower = q.toLowerCase();
+    final words = lower.split(RegExp(r'[^a-zA-Z]+')).where((w) => w.isNotEmpty).toSet();
+    const hinglishWords = {
+      'kya','kaise','kaisa','kaisi','kyu','kyon','kyunki','hai','hain','ho','hoga','hogi',
+      'tha','thi','the','mein','me','mera','meri','mere','aap','apka','apki','tum','tumhara',
+      'mujhe','mujhko','hum','hume','karna','karo','kare','karen','karta','karte','krna','krke',
+      'ka','ke','ki','ko','se','par','ya','aur','bhi','bahut','acha','achha','chahiye','nahi',
+      'nahin','haan','han','ab','kab','kahan','iska','uska','isliye','fir','phir','wala','wali',
+      'wale','lagao','batao','bata','btao','samjhao','paani','pani','fasal','kheti','kisan','rog',
+      'dawai','dawa','ilaaj','ilaj','upay','mitti','beej','sinchai','khad','gehun','gehu','chawal',
+      'aam','tamatar','sabzi'
+    };
+    if (words.intersection(hinglishWords).isNotEmpty) return 'hinglish';
+
+    return selected == 'hinglish' ? 'hinglish' : 'en';
+  }
 
   Future<void> _scrollToBottom() async {
     await Future<void>.delayed(

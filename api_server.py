@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import os
+import re
 import json
 import uuid
 import sqlite3
@@ -1681,6 +1682,7 @@ def _kr_language_name(code):
     names = {
         "en": "English",
         "hi": "Hindi",
+        "hinglish": "Hinglish",
         "pa": "Punjabi",
         "mr": "Marathi",
         "bn": "Bengali",
@@ -1866,7 +1868,7 @@ def ai_advice():
 
 def _language_instruction(language):
     names = {
-        "en": "English", "hi": "Hindi", "pa": "Punjabi", "mr": "Marathi",
+        "en": "English", "hi": "Hindi", "hinglish": "Hinglish (natural Hindi written in Roman/Latin script, mixed naturally with common English words)", "pa": "Punjabi", "mr": "Marathi",
         "bn": "Bengali", "gu": "Gujarati", "ta": "Tamil", "te": "Telugu",
         "kn": "Kannada", "ml": "Malayalam",
     }
@@ -2105,13 +2107,33 @@ FARMER QUESTION:
 
 
 @app.route("/api/chat", methods=["POST"])
+def _detect_chat_language(message, selected_language):
+    text = str(message or "").strip()
+    selected = str(selected_language or "en").lower()
+    if not text:
+        return selected
+    if re.search(r"[\u0B80-\u0BFF]", text): return "ta"
+    if re.search(r"[\u0C00-\u0C7F]", text): return "te"
+    if re.search(r"[\u0C80-\u0CFF]", text): return "kn"
+    if re.search(r"[\u0D00-\u0D7F]", text): return "ml"
+    if re.search(r"[\u0980-\u09FF]", text): return "bn"
+    if re.search(r"[\u0A80-\u0AFF]", text): return "gu"
+    if re.search(r"[\u0A00-\u0A7F]", text): return "pa"
+    if re.search(r"[\u0900-\u097F]", text): return "mr" if selected == "mr" else "hi"
+    words=set(re.findall(r"[a-zA-Z]+", text.lower()))
+    hw={"kya","kaise","kaisa","kaisi","kyu","kyon","kyunki","hai","hain","ho","hoga","hogi","tha","thi","the","mein","mera","meri","mere","aap","apka","apki","tum","tumhara","mujhe","mujhko","hum","hume","karna","karo","kare","karen","karta","karte","krna","krke","ka","ke","ki","ko","se","par","ya","aur","bhi","bahut","acha","achha","chahiye","nahi","nahin","haan","han","ab","kab","kahan","iska","uska","isliye","fir","phir","wala","wali","wale","lagao","batao","bata","btao","samjhao","paani","pani","fasal","kheti","kisan","rog","dawai","dawa","ilaaj","ilaj","upay","mitti","beej","sinchai","khad","gehun","gehu","chawal","aam","tamatar","sabzi"}
+    if len(words & hw) >= 2 or re.search(r"\b(kaise|kya|mujhe|aapko|karo|karna|batao|btao|kheti|paani|pani|khad|dawai|dawa|sinchai)\b", text.lower()):
+        return "hinglish"
+    return selected if selected in {"en","hi","hinglish","pa","mr","bn","gu","ta","te","kn","ml"} else "en"
+
 def ai_chat():
     try:
         data = request.get_json(silent=True) or {}
         message = str(data.get("message") or "").strip()
         language = str(data.get("language") or "en").lower()
-        if language not in {"en", "hi", "pa", "mr", "bn", "gu", "ta", "te", "kn", "ml"}:
+        if language not in {"en", "hi", "hinglish", "pa", "mr", "bn", "gu", "ta", "te", "kn", "ml"}:
             language = "en"
+        language = _detect_chat_language(message, language)
 
         context = data.get("context") or {}
         crop = str(context.get("crop") or "crop")
@@ -2266,8 +2288,9 @@ def ai_chat_stream():
         message = str(data.get("message") or "").strip()
         language = str(data.get("language") or "en").lower()
 
-        if language not in {"en", "hi", "pa", "mr", "bn", "gu", "ta", "te", "kn", "ml"}:
+        if language not in {"en", "hi", "hinglish", "pa", "mr", "bn", "gu", "ta", "te", "kn", "ml"}:
             language = "en"
+        language = _detect_chat_language(message, language)
 
         context = data.get("context") or {}
         crop = str(context.get("crop") or "crop")
