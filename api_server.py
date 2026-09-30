@@ -1999,13 +1999,11 @@ FARMER QUESTION:
         }
     }).encode("utf-8")
 
-    opener = urllib.request.build_opener(
-        urllib.request.ProxyHandler({})
-    )
+    opener = urllib.request.build_opener()
 
     # Current stable Flash model first; legacy models only if necessary.
     # Use one stable Flash model for faster Chat responses.
-    models = ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
+    models = GEMINI_FALLBACK_MODELS
 
     last_error = None
 
@@ -2106,7 +2104,6 @@ FARMER QUESTION:
     raise last_error or RuntimeError("All Gemini chat models failed")
 
 
-@app.route("/api/chat", methods=["POST"])
 def _detect_chat_language(message, selected_language):
     text = str(message or "").strip()
     selected = str(selected_language or "en").lower()
@@ -2126,6 +2123,7 @@ def _detect_chat_language(message, selected_language):
         return "hinglish"
     return selected if selected in {"en","hi","hinglish","pa","mr","bn","gu","ta","te","kn","ml"} else "en"
 
+@app.route("/api/chat", methods=["POST"])
 def ai_chat():
     try:
         data = request.get_json(silent=True) or {}
