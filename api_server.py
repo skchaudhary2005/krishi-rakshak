@@ -128,6 +128,32 @@ def diagnosis_safety_gate(confidence, top_predictions, vision=None):
 app = Flask(__name__)
 CORS(app)
 
+# ============================================================
+# SERVICE HEALTH / ROOT
+# ============================================================
+
+@app.route("/", methods=["GET"])
+def root():
+    return jsonify({
+        "service": "Krishi Rakshak API",
+        "status": "ok",
+        "message": "Krishi Rakshak backend is running.",
+        "health": "/api/health",
+        "chat": "/api/chat"
+    }), 200
+
+
+@app.route("/api/health", methods=["GET"])
+def health():
+    return jsonify({
+        "service": "Krishi Rakshak API",
+        "status": "ok",
+        "model": "krishi_rakshak.tflite",
+        "classes": len(classes) if classes else EXPECTED_CLASSES,
+        "input_size": INPUT_SIZE,
+        "database": os.path.exists(DB_PATH)
+    }), 200
+
 
 # ============================================================
 # GLOBAL MODEL VARIABLES
