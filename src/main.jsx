@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import './styles.css';
 
-const API = String(import.meta.env.VITE_API_BASE_URL || 'https://krishi-rakshak-api.onrender.com').replace(/\/$/, '');
+const API = 'http://127.0.0.1:5000';
 const SPLINE_SCENE = 'https://prod.spline.design/3Bkv7n76s1c763hb/scene.splinecode';
 const HISTORY_KEY = 'krishi_rakshak_web_history_v4';
 const WEATHER_CACHE_TTL = 10 * 60 * 1000;
@@ -390,12 +390,13 @@ function App() {
     try {
       const formData = new FormData();
       formData.append('image', file);
-      const response = await fetch(`${API}/api/predict`, { method: 'POST', body: formData });
+      const response = await fetch(`${API}/api/ai-vision`, { method: 'POST', body: formData });
       let data;
       try { data = await response.json(); } catch { throw new Error('Prediction service returned an unreadable response'); }
       if (!response.ok || data.success === false) throw new Error(data.error || 'Prediction failed');
 
-      const prediction = data.prediction || data.result?.prediction || data.result || {};
+      console.log('[KRISHI DEBUG] RAW JSON:', JSON.stringify(data, null, 2)); console.log('[KRISHI DEBUG] FILE:', file?.name); console.log('[KRISHI DEBUG] PREDICTION JSON:', JSON.stringify(data.prediction, null, 2)); const vision = data.vision || {};
+    const prediction = vision.disease ? { class_name: vision.disease, crop: vision.crop || 'crop', confidence: Number(vision.confidence || 0), severity: Number(vision.confidence || 0) >= 80 ? 'high' : Number(vision.confidence || 0) >= 60 ? 'medium' : 'low', status: 'gemini_visual_assessment', diagnosis_message: vision.observations || vision.reason || 'Gemini visual assessment' } : (data.prediction || data.result?.prediction || data.result || {});
       if (!prediction.class_name && !prediction.disease && !prediction.label) {
         throw new Error('Prediction response did not include a diagnosis');
       }
@@ -418,6 +419,7 @@ function App() {
         }
       } catch {}
 
+      data.prediction = prediction;
       setResult(data);
       const historyItem = {
         id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
@@ -822,4 +824,5 @@ const rootElement = document.getElementById('root');
 const reactRoot = globalThis.__krishiRakshakRoot || createRoot(rootElement);
 globalThis.__krishiRakshakRoot = reactRoot;
 reactRoot.render(<App />);
+
 

@@ -89,3 +89,25 @@ html,body,#root,.app-shell{max-width:100%;overflow-x:clip}
 .location-choices{display:grid;gap:8px;padding:14px;margin:0 0 14px}.location-choices>b{font-size:11px;color:#a9c0b4}.location-choices>button{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;text-align:left;color:var(--text);background:rgba(255,255,255,.025);border:1px solid var(--line);border-radius:12px;transition:background .2s,border-color .2s,transform .2s}.location-choices>button:hover{background:rgba(116,232,139,.07);border-color:rgba(116,232,139,.35);transform:translateY(-2px)}.location-choices>button span{display:grid;gap:4px}.location-choices>button strong{font-size:12px}.location-choices small{color:var(--muted);font-size:10px}.weather-place{display:flex;align-items:flex-start;gap:8px}.weather-place>span{display:grid;gap:3px}.weather-place>span b{font-size:14px}.weather-place>span small{font-size:10px;color:var(--muted);overflow-wrap:anywhere}
 
 /* Desktop Spline camera composition: shift the published scene left so the leaf and its surrounding drone fit the hero viewport. */
+
+/* KRISHI RAKSHAK EXPERT ICON VISUAL FIX ONLY */
+.topic-card .topic-emoji{
+  font-size:0 !important;
+  width:32px;
+  height:32px;
+  display:grid;
+  place-items:center;
+  line-height:1;
+}
+.topic-card .topic-emoji::before{
+  font-size:25px;
+  line-height:1;
+}
+.topic-card:nth-child(1) .topic-emoji::before{content:"\1F33F";}
+.topic-card:nth-child(2) .topic-emoji::before{content:"\1F4A7";}
+.topic-card:nth-child(3) .topic-emoji::before{content:"\1F9EA";}
+.topic-card:nth-child(4) .topic-emoji::before{content:"\1F41B";}
+.topic-card:nth-child(5) .topic-emoji::before{content:"\1F9A0";}
+.topic-card:nth-child(6) .topic-emoji::before{content:"\2601\FE0F";}
+.topic-card:nth-child(7) .topic-emoji::before{content:"\1F4E6";}
+.topic-card:nth-child(8) .topic-emoji::before{content:"\1F4C8";}
