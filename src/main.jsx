@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import './styles.css';
 
-const API = 'http://127.0.0.1:5000';
+const API = 'https://krishi-rakshak-api.onrender.com';
 const SPLINE_SCENE = 'https://prod.spline.design/3Bkv7n76s1c763hb/scene.splinecode';
 const HISTORY_KEY = 'krishi_rakshak_web_history_v4';
 const WEATHER_CACHE_TTL = 10 * 60 * 1000;
