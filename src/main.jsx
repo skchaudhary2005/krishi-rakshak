@@ -402,22 +402,65 @@ function App() {
       }
       let adviceData = null;
       try {
-        const adviceResponse = await fetch(`${API}/api/advice`, {
+        const geminiQuestion = `Using the Gemini Vision assessment below, give the farmer a practical, safe action plan for this crop.
+Return ONLY these four sections in English/Hindi according to the selected language:
+DESCRIPTION:
+TREATMENT:
+PREVENTION:
+FARMER ACTION:
+
+Do not claim the diagnosis is certain. Do not invent pesticide/fungicide doses or unsupported product names. For chemical treatment, say to use only a currently registered product for the identified crop/disease and follow the label/local agricultural guidance.
+
+Crop: ${prediction.crop || data.crop || 'crop'}
+Disease: ${prediction.class_name || prediction.disease || prediction.label || 'unknown'}
+Gemini confidence: ${Number(prediction.confidence || 0)}%
+Visible observations: ${vision.observations || 'not provided'}
+Gemini reason: ${vision.reason || 'not provided'}`;
+
+        const adviceResponse = await fetch(`${API}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            disease: prediction.class_name || prediction.disease || prediction.label,
-            crop: prediction.crop || data.crop || 'crop',
-            confidence: prediction.confidence || 0,
-            language: lang
+            message: geminiQuestion,
+            language: lang,
+            context: {
+              crop: prediction.crop || data.crop || 'crop',
+              disease: prediction.class_name || prediction.disease || prediction.label || 'unknown',
+              confidence: prediction.confidence || 0
+            },
+            history: []
           })
         });
+
         const adviceJson = await adviceResponse.json();
-        if (adviceResponse.ok) {
-          adviceData = adviceJson.advice || null;
+
+        if (adviceResponse.ok && adviceJson.source === 'gemini_ai') {
+          const reply = String(adviceJson.reply || '').replace(/\\r/g, '');
+          const extractSection = (label, nextLabels) => {
+            const next = nextLabels.length
+              ? nextLabels.join('|')
+              : '$';
+            const re = new RegExp(`(?:^|\\n)\\s*\\**\\s*${label}\\s*\\**\\s*:?\\s*([\\s\\S]*?)(?=\\n\\s*\\**\\s*(?:${next})\\s*\\**\\s*:?|$)`, 'i');
+            const match = reply.match(re);
+            return match ? match[1].trim() : '';
+          };
+
+          adviceData = {
+            description: extractSection('DESCRIPTION', ['TREATMENT', 'PREVENTION', 'FARMER ACTION']),
+            treatment: extractSection('TREATMENT', ['PREVENTION', 'FARMER ACTION']),
+            prevention: extractSection('PREVENTION', ['FARMER ACTION']),
+            farmer_action: extractSection('FARMER ACTION', [])
+          };
+
+          if (!adviceData.description && !adviceData.treatment && !adviceData.prevention && !adviceData.farmer_action) {
+            adviceData.description = reply;
+          }
+
           setAdvice(adviceData);
         }
-      } catch {}
+      } catch (error) {
+        console.warn('[KRISHI MOBILE] Gemini advice unavailable:', error);
+      }
 
       data.prediction = prediction;
       setResult(data);
